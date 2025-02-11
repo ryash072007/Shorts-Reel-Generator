@@ -48,8 +48,10 @@ def download_rfm_mp3(url):
     response = requests.get(url)
     response.raise_for_status()
     name = url.split("/")[-1]
-    with open("rfm/music/" + name, "wb") as f:
+    path = "rfm/music/" + name
+    with open(path, "wb") as f:
         f.write(response.content)
+    return path
 
 
 if __name__ == "__main__":
