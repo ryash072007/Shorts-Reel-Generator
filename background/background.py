@@ -51,4 +51,4 @@ def save_image(url: str, name: str):
 
 
 if __name__ == "__main__":
-    get_images(["a storyboard for a short film", "a storyboard for a dragon flying"])
+    get_images(["a storyboard for a realistic man writing a note", "a storyboard for a dragon flying"])
