@@ -1,7 +1,5 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-import requests
-from time import sleep
 
 driver_path = (
     r"e:\GitHub\Shorts-Reel-Generator\background\chromedriver-win64\chromedriver.exe"
@@ -19,36 +17,26 @@ browser: webdriver.Chrome = None
 
 
 def init():
-    global browser, option, service
+    global browser
     browser = webdriver.Chrome(options=option, service=service)
-    browser.implicitly_wait(30)
     browser.get("https://www.artbreeder.com/tools/prompter")
+    browser.implicitly_wait(30)
 
 
 def get_images(prompts: list):
     init()
 
-    generate_button = browser.find_elements(By.TAG_NAME, "button")[-1]
+    generate_button = browser.find_element(By.XPATH, "//button[@class='generate-button']")
 
-    text_area = browser.find_element(By.TAG_NAME, "textarea")
+    text_area = browser.find_element(By.TAG_NAME ,"textarea")
+    text_area.clear()
 
     for prompt in prompts:
-        text_area.clear()
         text_area.send_keys(prompt)
-        generate_button.click()
-        sleep(5)
-        image = browser.find_element(By.TAG_NAME, "img")
-        save_image(image.get_attribute("src"), prompt)
-
-
-def save_image(url: str, name: str):
-    response = requests.get(url)
-    response.raise_for_status()
-    path = "background/images/" + name + ".jpeg"
-    with open(path, "wb") as f:
-        f.write(response.content)
-    return path
+    
+    while True:
+        pass
 
 
 if __name__ == "__main__":
-    get_images(["a storyboard for a realistic man writing a note", "a storyboard for a dragon flying"])
+    get_images(["a storyboard for a short film", "a storyboard for a short film"])
