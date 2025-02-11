@@ -23,13 +23,14 @@ MOODS = {
     "upbeat": "Upbeat",
 }
 
+
 def load_soup(url):
     response = requests.get(url)
     response.raise_for_status()  # Ensure we notice bad responses
     return BeautifulSoup(response.text, "html.parser")
 
 
-def get_rndm_mixkit_rfmp3_link(type = None):
+def get_rndm_mixkit_rfmp3_link(type=None):
     query_url = None
     if type == None:
         query_url = DEFAULT_MIXKIT_URL_C
