@@ -19,6 +19,15 @@ def get_posts_content(subreddit_name, limit=1):
     else:
         get_posts_content(subreddit_name, limit)
 
+def break_down_text(text):
+    lines = text.split(".")
+    prompts = []
+    for i in range(0, len(lines), 3):
+        prompt = ". ".join(lines[i:i+3]).strip()
+        if prompt:
+            prompts.append(prompt)
+    return prompts
+
 
 if __name__ == "__main__":
     num_posts = 1

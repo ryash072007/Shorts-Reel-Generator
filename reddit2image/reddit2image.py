@@ -2,8 +2,9 @@ from groq import Groq
 import json, os, sys
 
 sys.path.append("background")
+sys.path.append("reddit")
 
-import background
+import background, reddit
 
 client = Groq(
     api_key=os.environ.get("GROQ_API_KEY"),
@@ -90,18 +91,7 @@ if __name__ == "__main__":
 
     init_text_model()
 
-    reply = get_text_reply(
-        """Vancouver, Colony of the British Empire
-
-June 17, 1859
-
-Rear Admiral Robert Baines was drowning.
-
-His body—battle-hardened, scarred, yet still strong—was sinking deeper and deeper into the abyss of depression. His wife had long left him for a nineteen-year-old crypto entrepreneur, and his son had become a YouTube prankster. What a disgrace…
-
-Only the service remained, but even here, in the seemingly familiar embrace of the Royal Army, he suffocated. Endless drills, reports, formations—it all felt like a slow death. His soul craved fierce battles and glorious victories, the enemy’s blood on his bayonet, the cold wind on his face, and the exhilarating roar of cannon fire."""
-    )
-
+    reply = get_text_reply()
     data = convert_output_to_dict(reply)
     prompts = convert_output_to_image(data)
     background.get_images(prompts)
