@@ -7,7 +7,7 @@
  The format is going to be as follows:
  1. Background is going to be sometype of gameplay / satisfying video / AI generated images (from pexel api) or videos
  2. The content is gonna be made using AI (model not yet decided) or taken from reddit.
- 3. Royalty-free music / images (from pexel api)
+ 3. Royalty-free music - DONE
  4. Random cool transitions
 
  Pre-Post Verifying:
