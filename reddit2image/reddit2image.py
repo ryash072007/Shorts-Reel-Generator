@@ -1,5 +1,9 @@
 from groq import Groq
-import json, os
+import json, os, sys
+
+sys.path.append("background")
+
+import background
 
 client = Groq(
     api_key=os.environ.get("GROQ_API_KEY"),
@@ -100,3 +104,4 @@ Only the service remained, but even here, in the seemingly familiar embrace of t
 
     data = convert_output_to_dict(reply)
     prompts = convert_output_to_image(data)
+    background.get_images(prompts)
