@@ -2,6 +2,26 @@ from bs4 import BeautifulSoup
 import random
 import requests
 
+# Complete url
+DEFAULT_MIXKIT_URL_C = "https://mixkit.co/free-stock-music/"
+
+# Incomplete url
+MOOD_MIXKIT_URL_IC = "https://mixkit.co/free-stock-music/mood/"
+
+MOODS = {
+    "happy": "Happy",
+    "sad": "Sad",
+    "mellow": "Mellow",
+    "aggresive": "Aggresive",
+    "uplifting": "Uplifting",
+    "whimsical": "Whimsical",
+    "dramatic": "Dramatic",
+    "eerie": "Eerie",
+    "mysterious": "Mysterious",
+    "romantic": "Romantic",
+    "smooth": "Smooth",
+    "upbeat": "Upbeat",
+}
 
 def load_soup(url):
     response = requests.get(url)
@@ -9,8 +29,12 @@ def load_soup(url):
     return BeautifulSoup(response.text, "html.parser")
 
 
-def get_rndm_mixkit_rfmp3_link():
-    query_url = "https://mixkit.co/free-stock-music/"
+def get_rndm_mixkit_rfmp3_link(type = None):
+    query_url = None
+    if type == None:
+        query_url = DEFAULT_MIXKIT_URL_C
+    else:
+        query_url = MOOD_MIXKIT_URL_IC + MOODS[type] + "/"
     soup = load_soup(query_url)
     div_list = soup.find_all("div", {"data-controller": "audio-player"})
     mp3_links_mixkit = []
