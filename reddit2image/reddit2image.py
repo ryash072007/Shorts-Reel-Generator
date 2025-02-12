@@ -22,6 +22,7 @@ tts = TTS(model_name="tts_models/en/jenny/jenny", progress_bar=True, gpu=False)
 
 history = []
 
+text_color = (0, 0, 0, 255)  # White by default, can be changed to any RGBA value
 
 def get_text_reply(prompt, add_to_memory=False):
     global history
@@ -105,7 +106,7 @@ def convert_output_to_dict(output):
         for i, split in enumerate(splits):
             if split == "excerpt":
                 output_dict["breakdown"].append({"excerpt": splits[i + 2]})
-            elif split == "image_prompt":
+            elif split == "image_prompt" or split == "image.prompt":
                 output_dict["breakdown"][-1]["image_prompt"] = splits[i + 2]
             elif split == "raw_excerpt":
                 output_dict["breakdown"][-1]["raw_excerpt"] = splits[i + 2]
@@ -145,31 +146,29 @@ def create_text_image(text, width, height, y_position):
     draw = ImageDraw.Draw(text_image)
 
     # Load font with a proper path
-    try:
-        font = ImageFont.truetype("arial.ttf", 40)  # Adjust font path if needed
-    except:
-        font = ImageFont.load_default()
+    font = ImageFont.truetype("BAUHS93.TTF", 72)  # Increased size to 128 and added bold
 
     # Handle empty text case
     if not text.strip():
         return text_image
 
     # Wrap text using textwrap
-    wrapped_text = textwrap.fill(text, width=20)  # Adjust width as needed
+    wrapped_text = textwrap.fill(text, width=10)  # Adjusted width for larger font
     lines = wrapped_text.split("\n")
 
     # Compute total text height
-    text_height = (
-        sum(font.getbbox(line)[3] for line in lines) + (len(lines) - 1) * 10
-    )  # Line spacing
+    text_height = sum(font.getbbox(line)[3] for line in lines) + (len(lines) - 1) * 20  # Increased line spacing
+
+    # Center text block vertically within the available space
+    starting_y = y_position + (height - text_height) // 2
+    y = starting_y
 
     # Draw text
-    y = y_position
     for line in lines:
         w, h = font.getbbox(line)[2:]
         x = (width - w) // 2  # Center text horizontally
-        draw.text((x, y), line, font=font, fill=(255, 255, 255, 255))
-        y += h + 10  # Spacing
+        draw.text((x, y), line, font=font, fill=text_color)  # Using text_color variable
+        y += h + 20  # Increased spacing
 
     return text_image
 
