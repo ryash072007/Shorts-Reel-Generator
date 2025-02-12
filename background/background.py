@@ -78,7 +78,7 @@ def get_bing_images(prompts: list, prefix="", start=0):
     text_area = browser.find_element(By.TAG_NAME, "textarea")
 
     for id, prompt in enumerate(prompts):
-        print(f"[DEBUG] Generating image idx {id + start} / {len(prompts)}")
+        print(f"[DEBUG] Generating image idx {id + start + 1} / {len(prompts)}")
         text_area.clear()
         text_area.send_keys(prompt)
 
