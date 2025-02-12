@@ -1,15 +1,8 @@
 from groq import Groq
 import json, os, sys
-import numpy as np
 from moviepy import *
-from PIL import Image
-from gtts import gTTS
 from moviepy import *
-from pyht import Client
 from TTS.api import TTS
-# from pyht.client import TTSOptions
-
-# from moviepy.editor import ImageClip, concatenate_videoclips, AudioFileClip
 
 sys.path.append("background")
 sys.path.append("reddit")
@@ -21,12 +14,6 @@ client = Groq(
 )
 
 tts = TTS(model_name="tts_models/en/jenny/jenny", progress_bar=True, gpu=False)
-
-# clientV = Client(
-#     user_id=os.getenv("PLAY_HT_USER_ID"),
-#     api_key=os.getenv("PLAY_HT_API_KEY"),
-# )
-# options = TTSOptions(voice="s3://voice-cloning-zero-shot/775ae416-49bb-4fb6-bd45-740f205d20a1/jennifersaad/manifest.json")
 
 history = []
 
@@ -113,17 +100,6 @@ def convert_output_to_post(output_dict):
     return post
 
 
-# frame_id = 0
-# i = 0
-# def get_frame(t):
-#     global frame_id, i
-#     frame = Image.open(f"background/images/{frame_id}.jpeg")
-#     i += 1
-#     if i % 24 == 0:
-#         frame_id += 1
-#     return np.array(frame)
-
-
 if __name__ == "__main__":
 
     init_text_model()
@@ -151,22 +127,8 @@ if __name__ == "__main__":
     audio_clips = []
     video_clips = []
 
-    # tts = TTS("tts_models/en/ljspeech/vits")
 
     for idx, subsection in enumerate(post_subsections):
-        # Convert text to speech
-
-        # tts = gTTS(subsection)
-        # audio_path = f"audio_{idx}.mp3"
-        # tts.save(audio_path)
-
-        # audio_path = f"audio_{idx}.wav"
-        # tts.tts_to_file(subsection, audio_path)
-
-        # audio_path = f"audio_{idx}.mp3"
-        # with open(audio_path, "wb") as audio_file:
-        #     for chunk in clientV.tts(subsection, options, voice_engine = 'PlayDialog-http'):
-        #         audio_file.write(chunk)
 
         audio_path = f"reddit2image/audio/audio_{idx}.mp3"
         tts.tts_to_file(text=subsection, file_path=audio_path, speed=1.5)
@@ -181,7 +143,6 @@ if __name__ == "__main__":
             .with_duration(audio_clip.duration)
             .with_audio(audio_clip)
         )
-        # image_clip = image_clip.set_audio(audio_clip)
         video_clips.append(image_clip)
 
     # Concatenate all video clips
