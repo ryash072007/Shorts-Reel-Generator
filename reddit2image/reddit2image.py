@@ -1,5 +1,15 @@
 from groq import Groq
 import json, os, sys
+import numpy as np
+from moviepy import *
+from PIL import Image
+from gtts import gTTS
+from moviepy import *
+from pyht import Client
+from TTS.api import TTS
+# from pyht.client import TTSOptions
+
+# from moviepy.editor import ImageClip, concatenate_videoclips, AudioFileClip
 
 sys.path.append("background")
 sys.path.append("reddit")
@@ -9,6 +19,14 @@ import background, reddit
 client = Groq(
     api_key=os.environ.get("GROQ_API_KEY"),
 )
+
+tts = TTS(model_name="tts_models/en/jenny/jenny", progress_bar=True, gpu=False)
+
+# clientV = Client(
+#     user_id=os.getenv("PLAY_HT_USER_ID"),
+#     api_key=os.getenv("PLAY_HT_API_KEY"),
+# )
+# options = TTSOptions(voice="s3://voice-cloning-zero-shot/775ae416-49bb-4fb6-bd45-740f205d20a1/jennifersaad/manifest.json")
 
 history = []
 
@@ -42,7 +60,6 @@ def get_text_reply(prompt, add_to_memory=False):
 
 
 def init_text_model():
-    global messages
     prompt = """Prompt:
 
 Break down the following text into smaller and smaller sections while preserving meaning. Each section should be paired with an AI-generated image prompt that visually represents its content. Ensure that:
@@ -75,8 +92,10 @@ def convert_output_to_dict(output):
     curly_2 = output.rfind("}")
     output = output[curly_1 + 1 : curly_2]
     output = "{" + output + "}"
-
-    output_dict = json.loads(output)
+    try:
+        output_dict = json.loads(output)
+    except:
+        print(output)
     return output_dict
 
 
@@ -87,11 +106,90 @@ def convert_output_to_image(output_dict):
     return prompts
 
 
+def convert_output_to_post(output_dict):
+    post = []
+    for item in output_dict["breakdown"]:
+        post.append(item["excerpt"])
+    return post
+
+
+# frame_id = 0
+# i = 0
+# def get_frame(t):
+#     global frame_id, i
+#     frame = Image.open(f"background/images/{frame_id}.jpeg")
+#     i += 1
+#     if i % 24 == 0:
+#         frame_id += 1
+#     return np.array(frame)
+
+
 if __name__ == "__main__":
 
     init_text_model()
 
-    reply = get_text_reply()
-    data = convert_output_to_dict(reply)
-    prompts = convert_output_to_image(data)
-    background.get_images(prompts)
+    broken_down_post = reddit.get_post_and_breakdown(5)
+
+    print(broken_down_post["post"])
+    breakdown = broken_down_post["breakdown"]
+
+    post_subsections = []
+
+    i = 0
+    total = 0
+    for bp in breakdown:
+        print(bp)
+        reply = get_text_reply(bp)
+        data = convert_output_to_dict(reply)
+        prompts = convert_output_to_image(data)
+        post_subsections.extend(convert_output_to_post(data))
+        nested_prompts = [prompts[i:i + 8] for i in range(0, len(prompts), 8)]
+        for _prompts in nested_prompts:
+            background.get_images(_prompts, "", total)
+            total += len(_prompts)
+
+    audio_clips = []
+    video_clips = []
+
+    # tts = TTS("tts_models/en/ljspeech/vits")
+
+    for idx, subsection in enumerate(post_subsections):
+        # Convert text to speech
+
+        # tts = gTTS(subsection)
+        # audio_path = f"audio_{idx}.mp3"
+        # tts.save(audio_path)
+
+        # audio_path = f"audio_{idx}.wav"
+        # tts.tts_to_file(subsection, audio_path)
+
+        # audio_path = f"audio_{idx}.mp3"
+        # with open(audio_path, "wb") as audio_file:
+        #     for chunk in clientV.tts(subsection, options, voice_engine = 'PlayDialog-http'):
+        #         audio_file.write(chunk)
+
+        audio_path = f"reddit2image/audio/audio_{idx}.mp3"
+        tts.tts_to_file(text=subsection, file_path=audio_path, speed=1.5)
+
+        audio_clip = AudioFileClip(audio_path)
+        audio_clips.append(audio_clip)
+
+        # Create video clip with image and audio
+        image_path = f"background/images/{idx}.jpeg"
+        image_clip = (
+            ImageClip(image_path)
+            .with_duration(audio_clip.duration)
+            .with_audio(audio_clip)
+        )
+        # image_clip = image_clip.set_audio(audio_clip)
+        video_clips.append(image_clip)
+
+    # Concatenate all video clips
+    final_clip = concatenate_videoclips(video_clips)
+    final_clip.write_videofile("reddit2image/output/output_video.mp4", fps=24)
+
+    # Clean up temporary audio files
+    for idx in range(len(post_subsections)):
+        os.remove(f"reddit2image/audio/audio_{idx}.mp3")
+    for idx in range(len(post_subsections)):
+        os.remove(f"background/images/{idx}.jpeg")
