@@ -142,7 +142,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 def generate_audio_for_segment(segment, idx):
     audio_path = f"AiStoryMaker/audio/segment_{idx}.mp3"
-    tts.tts_to_file(text=segment["narration"], file_path=audio_path, speed=1.0)
+    tts.tts_to_file(text=segment["narration"], file_path=audio_path, speed=1.1)
     print(f"[DEBUG] Audio generated for segment {idx+1} at {audio_path}")
     return audio_path
 
@@ -187,7 +187,37 @@ def create_video(segments):
     final_video = concatenate_videoclips(video_clips, method="compose")
     return final_video
 
-def main(emotion, additional_prompt=""):
+def get_social_content(story):
+    """
+    Generate a social media package: title, description, and pinned comment for the given prompt and story.
+    """
+    social_prompt = f"""
+Given the following story:
+Story: {story}
+
+Generate a social media package that includes:
+- Title: A compelling title for the content.
+- Description: A concise description suitable for a video description. There should be numerous tags as well here.
+- Pinned Comment: A friendly and engaging first comment to pin.
+
+Return the result in JSON format:
+{{
+    "title": "...",
+    "description": "...",
+    "pinned_comment": "..."
+}}
+    """
+    response = get_text_reply(social_prompt)
+    try:
+        start_idx = response.find("{")
+        end_idx = response.rfind("}") + 1
+        json_str = response[start_idx:end_idx]
+        return json.loads(json_str)
+    except Exception as e:
+        print(f"[ERROR] Failed to parse social content JSON: {e}")
+        return {"title": "", "description": "", "pinned_comment": ""}
+
+def main(emotion, additional_prompt="", only_descriptor=False):
     print("[DEBUG] Starting AiStoryMaker...")
     print(f"[DEBUG] Creating directories...")
     # Create necessary directories
@@ -198,6 +228,12 @@ def main(emotion, additional_prompt=""):
     print("Generating story...")
     story = generate_story(emotion, additional_prompt)
     
+    descriptors = get_social_content(story)
+    print(f"[DEBUG] Social media package generated: {descriptors}")
+
+    if only_descriptor:
+        exit()
+
     print("[DEBUG] Story breakdown started")
     print("Breaking down story into segments...")
     story_data = break_down_story(story)
@@ -229,4 +265,4 @@ if __name__ == "__main__":
     print("[DEBUG] AiStoryMaker script started")
     emotion = input("Enter the primary emotion for the story: ")
     additional_prompt = input("Enter any additional requirements (or press Enter to skip): ")
-    main(emotion, additional_prompt)
+    main(emotion, additional_prompt, True)
