@@ -1,13 +1,11 @@
 import textwrap
 from groq import Groq
-import json, os, sys
-from moviepy import *
+import json, os, sys, random, time
+# from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, VideoClip, CompositeVideoClip
 from moviepy import *
 from TTS.api import TTS
 from PIL import Image, ImageFilter, ImageDraw, ImageFont
 import numpy as np
-import random
-import time
 
 sys.path.append("background")
 sys.path.append("reddit")
@@ -172,6 +170,39 @@ def create_text_image(text, width, height, y_position):
 
     return text_image
 
+# New helper: Returns the current word based on time
+def get_current_word(full_text, t, total_duration):
+    words = full_text.split()
+    if not words:
+        return ""
+    word_duration = total_duration / len(words)
+    index = int(t // word_duration)
+    if index >= len(words):
+        index = len(words) - 1
+    return words[index]
+
+# New helper: Creates a dynamic text clip that updates the displayed word based on time
+def create_dynamic_text_clip(full_text, duration, width, height, font_path="BAUHS93.TTF", font_size=72):
+    def make_frame(t):
+        current_word = get_current_word(full_text, t, duration)
+        print(f"[DEBUG] Dynamic text clip: time={t:.2f}s, word='{current_word}'")
+
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.truetype(font_path, font_size)
+
+        # Fix: Replaced textsize() with textbbox()
+        bbox = draw.textbbox((0, 0), current_word, font=font)
+        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        x = (width - w) // 2
+        y = (height - h) // 2
+        draw.text((x, y), current_word, font=font, fill=text_color)
+
+        return np.array(img)
+
+    return VideoClip(make_frame, duration=duration)
+
 
 if __name__ == "__main__":
     print("[DEBUG] Starting script execution...")
@@ -277,24 +308,18 @@ if __name__ == "__main__":
         )
         combined.paste(img, img_pos)
 
-        # Create and paste text
-        text_y_position = img_pos[1] + new_size[1] + 50  # 50 pixels below the image
-        text_image = create_text_image(
-            text_prompts[idx], target_width, target_height - text_y_position, 0
-        )
-        combined.paste(text_image, (0, text_y_position), text_image)
+        # Instead of static text, create a dynamic text clip showing one word at a time
+        text_clip_height = 200  # Height for dynamic text area
+        text_y_position = img_pos[1] + new_size[1] + 50
+        base_clip = ImageClip(np.array(combined)).with_duration(audio_clip.duration)
+        dynamic_text_clip = create_dynamic_text_clip(
+            text_prompts[idx], audio_clip.duration, target_width, text_clip_height
+        ).with_position(("center", text_y_position))
 
-        # Save temporary combined image
-        temp_path = f"background/images/temp_{idx}.png"
-        combined.save(temp_path)
-
-        # Create video clip with combined image
-        image_clip = (
-            ImageClip(temp_path)
-            .with_duration(audio_clip.duration)
-            .with_audio(audio_clip)
-        )
-        video_clips.append(image_clip)
+        final_clip = CompositeVideoClip([base_clip, dynamic_text_clip]).with_duration(audio_clip.duration)
+        # Adding audio to the final composite
+        final_clip = final_clip.with_audio(audio_clip)
+        video_clips.append(final_clip)
 
     print("[DEBUG] Concatenating final video...")
     final_clip = concatenate_videoclips(video_clips)
