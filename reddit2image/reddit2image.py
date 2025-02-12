@@ -185,8 +185,8 @@ if __name__ == "__main__":
 
     # specifc
     broken_down_post = reddit.get_post_and_breakdown(
-        4,
-        "https://www.reddit.com/r/ProRevenge/comments/1enrrhw/cable_company_kept_calling_to_recharge_even_after/",
+        6,
+        "https://www.reddit.com/r/ApplyingToCollege/comments/1intpmi/duke_alumni_interview_does_it_affect_admissions/",
     )
 
     print("[DEBUG] Processing post content...")
@@ -229,7 +229,7 @@ if __name__ == "__main__":
         )
         audio_path = f"reddit2image/audio/audio_{idx}.mp3"
         tts.tts_to_file(
-            text=subsection, file_path=audio_path, speed=random.uniform(1.2, 1.8)
+            text=subsection, file_path=audio_path, speed=random.uniform(1.4, 1.8)
         )
 
         audio_clip = AudioFileClip(audio_path)
