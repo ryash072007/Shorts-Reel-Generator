@@ -156,4 +156,4 @@ from PIL import ImageFont
 # else:
 #     print(f"Failed to fetch the post. Status code: {response.status_code}")
 
-# font = ImageFont.truetype("BAUHS93.TTF", 72)  # Increased size to 128 and added bold
+font = ImageFont.truetype("impact.ttf", 72)  # Increased size to 128 and added bold

@@ -144,7 +144,7 @@ def create_text_image(text, width, height, y_position):
     draw = ImageDraw.Draw(text_image)
 
     # Load font with a proper path
-    font = ImageFont.truetype("BAUHS93.TTF", 72)  # Increased size to 128 and added bold
+    font = ImageFont.truetype("impact.ttf", 124)  # Increased size to 124 and added bold
 
     # Handle empty text case
     if not text.strip():
@@ -182,25 +182,33 @@ def get_current_word(full_text, t, total_duration):
     return words[index]
 
 # New helper: Creates a dynamic text clip that updates the displayed word based on time
-def create_dynamic_text_clip(full_text, duration, width, height, font_path="BAUHS93.TTF", font_size=72):
+def create_dynamic_text_clip(full_text, duration, width, height, font_path="impact.ttf", font_size=124):
+    words = full_text.split()
+    word_duration = duration / len(words) if words else duration
+    transition_duration = 0.2  # duration of pop-out effect in seconds
     def make_frame(t):
         current_word = get_current_word(full_text, t, duration)
-        print(f"[DEBUG] Dynamic text clip: time={t:.2f}s, word='{current_word}'")
+        current_index = int(t // word_duration)
+        dt = t - current_index * word_duration
+        # Compute pop-out scale: from 0.8 to 1.0 over transition_duration
+        if dt < transition_duration:
+            scale = 0.8 + 0.2 * (dt / transition_duration)
+        else:
+            scale = 1.0
+        print(f"[DEBUG] Dynamic text clip: time={t:.2f}s, word='{current_word}', scale={scale:.2f}")
 
         img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        font = ImageFont.truetype(font_path, font_size)
+        effective_font_size = max(1, int(font_size * scale))
+        font = ImageFont.truetype(font_path, effective_font_size)
 
-        # Fix: Replaced textsize() with textbbox()
         bbox = draw.textbbox((0, 0), current_word, font=font)
         w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
         x = (width - w) // 2
         y = (height - h) // 2
         draw.text((x, y), current_word, font=font, fill=text_color)
-
         return np.array(img)
-
     return VideoClip(make_frame, duration=duration)
 
 
@@ -329,6 +337,6 @@ if __name__ == "__main__":
     for idx in range(len(post_subsections)):
         os.remove(f"reddit2image/audio/audio_{idx}.mp3")
         os.remove(f"background/images/{idx}.png")
-        os.remove(f"background/images/temp_{idx}.png")
+        # os.remove(f"background/images/temp_{idx}.png")
 
     print("[DEBUG] Script execution completed successfully")
