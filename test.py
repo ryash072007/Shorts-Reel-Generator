@@ -1,6 +1,6 @@
 # import requests
 # from bs4 import BeautifulSoup
-from PIL import ImageFont
+# from PIL import ImageFont
 
 # # # # # from pyt2s.services import stream_elements
 
@@ -39,26 +39,26 @@ from PIL import ImageFont
 # # # # # # save audio to disk
 # # # # # write_wav("bark_generation.wav", SAMPLE_RATE, speech_array1)
 
-# # # from TTS.api import TTS
+from TTS.api import TTS
 
-# # # # Initialize the TTS engine
-# # # tts = TTS(model_name="tts_models/en/jenny/jenny")  # Replace with your model name
+# Initialize the TTS engine
+tts = TTS(model_name="tts_models/en/ljspeech/fast_pitch")  # Replace with your model name
 
-# # # # Define your SSML input
-# # # ssml_input = """
-# # # <speak>
-# # #     <voice name="en-US-Standard-C">
-# # #         <prosody rate="slow" pitch="+2st">Hello, welcome to Coqui TTS.</prosody>
-# # #     </voice>
-# # #     <break time="500ms"/>
-# # #     <prosody rate="medium">This is an example of using SSML with Coqui TTS.</prosody>
-# # # </speak>
-# # # """
+# Define your SSML input
+ssml_input = """
+<speak>
+    <voice name="en-US-Standard-C">
+        <prosody rate="slow" pitch="+2st">Hello, welcome to Coqui TTS.</prosody>
+    </voice>
+    <break time="500ms"/>
+    <prosody rate="medium">This is an example of using SSML with Coqui TTS.</prosody>
+</speak>
+"""
 
-# # # tts.tts_to_file(text=ssml_input, file_path="output.mp3")
+tts.tts_to_file(text=ssml_input, file_path="output.mp3")
 
-# # # # Generate speech from SSML
-# # # # tts.speak(ssml_input)
+# Generate speech from SSML
+# tts.speak(ssml_input)
 
 # # output = """
 # # {
@@ -156,4 +156,4 @@ from PIL import ImageFont
 # else:
 #     print(f"Failed to fetch the post. Status code: {response.status_code}")
 
-font = ImageFont.truetype("impact.ttf", 72)  # Increased size to 128 and added bold
+# font = ImageFont.truetype("impact.ttf", 72)  # Increased size to 128 and added bold

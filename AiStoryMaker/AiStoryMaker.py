@@ -1,28 +1,26 @@
-import textwrap
 from groq import Groq
-import json, os, sys, random, time
+import json, os, sys, time
 from moviepy import *
 from TTS.api import TTS
 from PIL import Image, ImageFilter, ImageDraw, ImageFont
 import numpy as np
-from moviepy.video.VideoClip import ColorClip
 
 sys.path.append("background")
-from background import get_fast_images
+from background import get_fast_images, quit_browser
 
 client = Groq(
     api_key=os.environ.get("GROQ_API_KEY"),
 )
 
-tts = TTS(model_name="tts_models/en/jenny/jenny", progress_bar=True, gpu=False)
+tts = TTS(model_name="tts_models/en/ljspeech/fast_pitch", progress_bar=True, gpu=False)
 text_color = (255, 255, 255, 255)  # White text for better visibility
 
 # Add new constants
 FONT_SIZE = 140  # Increased base font size
-FONT_PATH = "arial.ttf"  # Change to your preferred font
+FONT_PATH = "impact.ttf"  # Change to your preferred font
 TEXT_SHADOW_COLOR = (0, 0, 0, 255)
-TEXT_BACKGROUND_OPACITY = 128
-WORD_FADE_DURATION = 0.2
+TEXT_BACKGROUND_OPACITY = 0  # No background for better readability
+WORD_FADE_DURATION = 0.1
 SCALE_RANGE = (0.9, 1.1)
 
 def generate_story(emotion, additional_prompt=""):
@@ -43,7 +41,7 @@ def generate_story(emotion, additional_prompt=""):
 
 def break_down_story(story):
     print("[DEBUG] Breaking down story into segments...")
-    prompt = f"""Break down this story into 5-8 segments. For each segment:
+    prompt = f"""Break down this story into sensible and related segments. For each segment:
     1. Create expressive SSML-formatted text for narration
     2. Generate a detailed image prompt that captures the scene's emotion
     3. Extract the raw text for captions
@@ -114,7 +112,6 @@ def create_dynamic_text_clip(text, duration, width, height, font_size=FONT_SIZE)
         progress_scale = min(1.0, word_progress * 2)
         scale = SCALE_RANGE[0] + (SCALE_RANGE[1] - SCALE_RANGE[0]) * progress_scale
         
-        # Create base image
         img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         
@@ -124,23 +121,16 @@ def create_dynamic_text_clip(text, duration, width, height, font_size=FONT_SIZE)
             font = ImageFont.load_default()
             print(f"[DEBUG] Fallback to default font - couldn't load {FONT_PATH}")
         
-        # Get text size
         bbox = draw.textbbox((0, 0), word, font=font)
         w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
         x = (width - w) // 2
         y = (height - h) // 2
         
-        # Draw text background for better readability
         padding = 20
         background_bbox = (x-padding, y-padding, x+w+padding, y+h+padding)
         draw.rectangle(background_bbox, fill=(0, 0, 0, TEXT_BACKGROUND_OPACITY))
+        # Removed shadow effect lines
         
-        # Draw multiple shadows for depth effect
-        shadow_offsets = [(2, 2), (3, 3), (4, 4)]
-        for offset_x, offset_y in shadow_offsets:
-            draw.text((x+offset_x, y+offset_y), word, font=font, fill=TEXT_SHADOW_COLOR)
-        
-        # Draw main text with current opacity
         text_color_with_opacity = (*text_color[:3], opacity)
         draw.text((x, y), word, font=font, fill=text_color_with_opacity)
         
@@ -148,57 +138,52 @@ def create_dynamic_text_clip(text, duration, width, height, font_size=FONT_SIZE)
     
     return VideoClip(make_frame, duration=duration)
 
+from concurrent.futures import ThreadPoolExecutor
+
+def generate_audio_for_segment(segment, idx):
+    audio_path = f"AiStoryMaker/audio/segment_{idx}.mp3"
+    tts.tts_to_file(text=segment["narration"], file_path=audio_path, speed=1.0)
+    print(f"[DEBUG] Audio generated for segment {idx+1} at {audio_path}")
+    return audio_path
+
 def create_video(segments):
     print(f"[DEBUG] Creating enhanced video with {len(segments)} segments")
     video_clips = []
     
+    # Generate audio clips concurrently
+    audio_paths = [None] * len(segments)
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(generate_audio_for_segment, seg, idx): idx for idx, seg in enumerate(segments)}
+        for future in futures:
+            idx = futures[future]
+            audio_paths[idx] = future.result()
+    
     for idx, segment in enumerate(segments):
         print(f"[DEBUG] Processing segment {idx+1}/{len(segments)}")
-        
-        # Generate audio
-        audio_path = f"AiStoryMaker/audio/segment_{idx}.mp3"
-        tts.tts_to_file(text=segment["narration"], file_path=audio_path, speed=1.1)  # Slightly slower for better sync
+        audio_path = audio_paths[idx]
         audio_clip = AudioFileClip(audio_path)
         
-        # Get and process background image
         get_fast_images([segment["image_prompt"]], prefix="", start=idx)
         image_path = f"background/images/{idx}.png"
         
-        # Create enhanced background
         img = Image.open(image_path)
         target_width, target_height = 1080, 1920
-        
-        # Create a gradient overlay
         gradient = Image.new('RGBA', (target_width, target_height), (0, 0, 0, 0))
         gradient_draw = ImageDraw.Draw(gradient)
-        gradient_draw.rectangle((0, 0, target_width, target_height), 
-                              fill=(0, 0, 0, 80))  # Slight darkening
-        
-        # Process background image
+        gradient_draw.rectangle((0, 0, target_width, target_height), fill=(0, 0, 0, 80))
         img = img.resize((target_width, target_height), Image.LANCZOS)
         img = img.filter(ImageFilter.GaussianBlur(radius=2))
         img = Image.alpha_composite(img.convert('RGBA'), gradient)
         
-        # Create base clip
         base_clip = ImageClip(np.array(img)).with_duration(audio_clip.duration)
-        
-        # Create text clip with enhanced animation
-        text_clip = create_dynamic_text_clip(
-            segment["raw_text"],
-            audio_clip.duration,
-            target_width,
-            300  # Increased height for text area
-        ).with_position(("center", target_height//2))
-        
-        # Add fade effects to the whole segment
+        text_clip = create_dynamic_text_clip(segment["raw_text"], audio_clip.duration, target_width, 300).with_position(("center", target_height//2))
         final_clip = CompositeVideoClip([base_clip, text_clip])
-        final_clip = final_clip.with_effects([vfx.FadeIn(0.5), vfx.FadeOut(0.5)])
-        final_clip = final_clip.with_audio(audio_clip)
-        
+        final_clip = final_clip.with_effects([vfx.FadeIn(0.5), vfx.FadeOut(0.5)]).with_audio(audio_clip)
         video_clips.append(final_clip)
         print(f"[DEBUG] Enhanced segment {idx+1} complete")
     
-    # Add smooth transitions between clips
+    quit_browser()
+
     final_video = concatenate_videoclips(video_clips, method="compose")
     return final_video
 

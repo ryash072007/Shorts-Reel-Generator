@@ -29,6 +29,10 @@ def init():
     browser.get("https://lorastudio.co/generate?model=KappaNeuro/makoto-shinkai-style")
 
 
+def quit_browser():
+    if browser:
+        browser.quit()
+
 def get_images(prompts: list, prefix="", start=0):
     init()
 
