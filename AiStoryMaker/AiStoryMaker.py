@@ -43,7 +43,7 @@ def generate_story(emotion, additional_prompt=""):
 
 def break_down_story(story):
     print("[DEBUG] Breaking down story into segments...")
-    prompt = f"""Break down this story into 13-15 sensible and related segments. For each segment:
+    prompt = f"""Break down this story into 2 sensible and related segments. For each segment:
     1. Create expressive SSML-formatted text for narration
     2. Generate a detailed image prompt that captures the scene's emotion
     3. Extract the raw text for captions
@@ -215,7 +215,7 @@ def create_video(segments):
     story_video = concatenate_videoclips(video_clips, method="compose")
     
     # Append the external bottom video clip
-    BOTTOM_CLIP_PATH = "reddit2image/gameplay/mcparkour.mp4"  # path to your external bottom video
+    BOTTOM_CLIP_PATH = "reddit2image/gameplay/mcparkour - FPS - Videobolt.net.mp4"  # path to your external bottom video
     bottom_source = VideoFileClip(BOTTOM_CLIP_PATH).with_fps(4)
     # Crop the external video: take a vertical slice of height equal to half_height from the center
     crop_y1 = int((bottom_source.h - half_height) / 2)
@@ -296,7 +296,7 @@ def main(emotion, additional_prompt="", only_descriptor=False):
 
     print("[DEBUG] Saving final video...")
     print("Saving video...")
-    output_path = f"AiStoryMaker/output/{descriptors.get('title')}.mp4"
+    output_path = f"AiStoryMaker/output/output.mp4"
     final_video.write_videofile(output_path, fps=4)
 
     print("[DEBUG] Cleaning up temporary files...")
