@@ -28,7 +28,7 @@ def generate_story(emotion, additional_prompt=""):
     print(f"[DEBUG] Generating story with emotion: {emotion}")
     if additional_prompt:
         print(f"[DEBUG] Additional prompt: {additional_prompt}")
-    prompt = f"""Create a compelling short story (75-125 words) that primarily evokes the emotion of {emotion}. 
+    prompt = f"""Create a compelling short story (50-100 words) that primarily evokes the emotion of {emotion}. 
     Additional requirements: {additional_prompt}
     
     The story should be vivid, engaging, and suitable for visual storytelling.
@@ -43,7 +43,7 @@ def generate_story(emotion, additional_prompt=""):
 
 def break_down_story(story):
     print("[DEBUG] Breaking down story into segments...")
-    prompt = f"""Break down this story into sensible and related segments. For each segment:
+    prompt = f"""Break down this story into 13-15 sensible and related segments. For each segment:
     1. Create expressive SSML-formatted text for narration
     2. Generate a detailed image prompt that captures the scene's emotion
     3. Extract the raw text for captions
@@ -106,16 +106,9 @@ def create_dynamic_text_clip(text, duration, width, height, font_size=FONT_SIZE)
         current_index = int(t // word_duration)
         word = words[min(current_index, len(words) - 1)]
 
-        # Calculate fade and scale effects
+        # Calculate scale effect
         word_start_time = current_index * word_duration
         word_progress = (t - word_start_time) / word_duration
-
-        # Fade effect
-        opacity = 255
-        if word_progress < WORD_FADE_DURATION:
-            opacity = int(255 * (word_progress / WORD_FADE_DURATION))
-        elif word_progress > (1 - WORD_FADE_DURATION):
-            opacity = int(255 * ((1 - word_progress) / WORD_FADE_DURATION))
 
         # Scale effect
         progress_scale = min(1.0, word_progress * 2)
@@ -138,9 +131,8 @@ def create_dynamic_text_clip(text, duration, width, height, font_size=FONT_SIZE)
         padding = 20
         background_bbox = (x - padding, y - padding, x + w + padding, y + h + padding)
         draw.rectangle(background_bbox, fill=(0, 0, 0, TEXT_BACKGROUND_OPACITY))
-        # Removed shadow effect lines
-
-        text_color_with_opacity = (*text_color[:3], opacity)
+        # Set opacity instantly to full (no fade effect)
+        text_color_with_opacity = (*text_color[:3], 255)
         draw.text((x, y), word, font=font, fill=text_color_with_opacity)
 
         return np.array(img)
