@@ -189,7 +189,7 @@ def create_video(segments):
         gradient_draw.rectangle((0, 0, target_width, half_height), fill=(0, 0, 0, 80))
         img_top = img_top.filter(ImageFilter.GaussianBlur(radius=2))
         img_top = Image.alpha_composite(img_top.convert("RGBA"), gradient)
-        base_clip_top: VideoClip = ImageClip(np.array(img_top)).with_duration(audio_clip.duration)
+        base_clip_top = ImageClip(np.array(img_top)).with_duration(audio_clip.duration)
 
         # Create dynamic text clip sized and centered to the top half
         text_clip = create_dynamic_text_clip(
@@ -197,7 +197,7 @@ def create_video(segments):
         ).with_position(("center", half_height//2))
 
         # Composite clips: black background, top image, and text
-        final_clip: VideoClip = CompositeVideoClip([
+        final_clip = CompositeVideoClip([
             background_clip,
             base_clip_top.with_position(("center", "top")),
             text_clip
@@ -216,15 +216,15 @@ def create_video(segments):
     
     # Append the external bottom video clip
     BOTTOM_CLIP_PATH = "reddit2image/gameplay/mcparkour.mp4"  # path to your external bottom video
-    bottom_source: VideoClip = VideoFileClip(BOTTOM_CLIP_PATH)
+    bottom_source = VideoFileClip(BOTTOM_CLIP_PATH).with_fps(4)
     # Crop the external video: take a vertical slice of height equal to half_height from the center
     crop_y1 = int((bottom_source.h - half_height) / 2)
     crop_y2 = crop_y1 + half_height
     bottom_cropped = bottom_source.cropped(y1=crop_y1, y2=crop_y2)
     # Resize the cropped video to fill the target width and bottom half height
-    bottom_resized: VideoClip = bottom_cropped.resized(newsize=(target_width, half_height))
+    bottom_resized = bottom_cropped.resized(new_size=(target_width, half_height))
     # Create black background for full frame and overlay the bottom video at bottom
-    bottom_bg = ColorClip(size=(target_width, target_height), color=(0, 0, 0)).with_duration(bottom_resized.duration)
+    bottom_bg = ColorClip(size=(target_width, target_height), color=(0, 0, 0, 0)).with_duration(bottom_resized.duration)
     bottom_composite = CompositeVideoClip([
         bottom_bg,
         bottom_resized.with_position(("center", "bottom"))
