@@ -1,5 +1,5 @@
 from groq import Groq
-import json, os, sys, time
+import json, os, sys, time, random
 from moviepy import *
 from TTS.api import TTS
 from PIL import Image, ImageFilter, ImageDraw, ImageFont
@@ -20,12 +20,13 @@ FONT_SIZE = 140  # Increased base font size
 FONT_PATH = "impact.ttf"  # Change to your preferred font
 TEXT_SHADOW_COLOR = (0, 0, 0, 255)
 TEXT_BACKGROUND_OPACITY = 0  # No background for better readability
-WORD_FADE_DURATION = 0.1
+WORD_FADE_DURATION = 0.05
 SCALE_RANGE = (0.9, 1.1)
+
 
 def generate_story(emotion, additional_prompt=""):
     print(f"[DEBUG] Generating story with emotion: {emotion}")
-    if (additional_prompt):
+    if additional_prompt:
         print(f"[DEBUG] Additional prompt: {additional_prompt}")
     prompt = f"""Create a compelling short story (300-500 words) that primarily evokes the emotion of {emotion}. 
     Additional requirements: {additional_prompt}
@@ -34,10 +35,11 @@ def generate_story(emotion, additional_prompt=""):
     Focus on descriptive language and emotional depth.
     
     Return the story in a simple text format."""
-    
+
     result = get_text_reply(prompt)
     print(f"[DEBUG] Story generated successfully ({len(result)} characters)")
     return result
+
 
 def break_down_story(story):
     print("[DEBUG] Breaking down story into segments...")
@@ -58,10 +60,15 @@ def break_down_story(story):
     }}
 
     Story: {story}"""
-    
+
     response = get_text_reply(prompt)
     print("[DEBUG] Story breakdown complete")
-    return convert_output_to_dict(response)
+    return_dict = convert_output_to_dict(response)
+    if not return_dict:
+        print("[ERROR] Failed to parse story segments, retrying...")
+        return break_down_story(story)
+    return return_dict
+
 
 def get_text_reply(prompt):
     print("[DEBUG] Sending request to Groq API...")
@@ -78,6 +85,7 @@ def get_text_reply(prompt):
         time.sleep(5)
         return get_text_reply(prompt)
 
+
 def convert_output_to_dict(output):
     try:
         start_idx = output.find("{")
@@ -86,106 +94,118 @@ def convert_output_to_dict(output):
         return json.loads(json_str)
     except:
         print("[ERROR] Failed to parse JSON, returning empty structure")
-        return {"segments": []}
+        return None
+
 
 def create_dynamic_text_clip(text, duration, width, height, font_size=FONT_SIZE):
     print(f"[DEBUG] Creating enhanced dynamic text clip (duration: {duration}s)")
     words = text.split()
     word_duration = duration / len(words) if words else duration
-    
+
     def make_frame(t):
         current_index = int(t // word_duration)
-        word = words[min(current_index, len(words)-1)]
-        
+        word = words[min(current_index, len(words) - 1)]
+
         # Calculate fade and scale effects
         word_start_time = current_index * word_duration
         word_progress = (t - word_start_time) / word_duration
-        
+
         # Fade effect
         opacity = 255
         if word_progress < WORD_FADE_DURATION:
             opacity = int(255 * (word_progress / WORD_FADE_DURATION))
         elif word_progress > (1 - WORD_FADE_DURATION):
             opacity = int(255 * ((1 - word_progress) / WORD_FADE_DURATION))
-        
+
         # Scale effect
         progress_scale = min(1.0, word_progress * 2)
         scale = SCALE_RANGE[0] + (SCALE_RANGE[1] - SCALE_RANGE[0]) * progress_scale
-        
+
         img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        
+
         try:
             font = ImageFont.truetype(FONT_PATH, int(font_size * scale))
         except:
             font = ImageFont.load_default()
             print(f"[DEBUG] Fallback to default font - couldn't load {FONT_PATH}")
-        
+
         bbox = draw.textbbox((0, 0), word, font=font)
         w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
         x = (width - w) // 2
         y = (height - h) // 2
-        
+
         padding = 20
-        background_bbox = (x-padding, y-padding, x+w+padding, y+h+padding)
+        background_bbox = (x - padding, y - padding, x + w + padding, y + h + padding)
         draw.rectangle(background_bbox, fill=(0, 0, 0, TEXT_BACKGROUND_OPACITY))
         # Removed shadow effect lines
-        
+
         text_color_with_opacity = (*text_color[:3], opacity)
         draw.text((x, y), word, font=font, fill=text_color_with_opacity)
-        
+
         return np.array(img)
-    
+
     return VideoClip(make_frame, duration=duration)
+
 
 from concurrent.futures import ThreadPoolExecutor
 
+
 def generate_audio_for_segment(segment, idx):
     audio_path = f"AiStoryMaker/audio/segment_{idx}.mp3"
-    tts.tts_to_file(text=segment["narration"], file_path=audio_path, speed=1.1)
+    tts.tts_to_file(text=segment["narration"], file_path=audio_path, speed=1.5)
     print(f"[DEBUG] Audio generated for segment {idx+1} at {audio_path}")
     return audio_path
+
 
 def create_video(segments):
     print(f"[DEBUG] Creating enhanced video with {len(segments)} segments")
     video_clips = []
-    
+
     # Generate audio clips concurrently
     audio_paths = [None] * len(segments)
     with ThreadPoolExecutor() as executor:
-        futures = {executor.submit(generate_audio_for_segment, seg, idx): idx for idx, seg in enumerate(segments)}
+        futures = {
+            executor.submit(generate_audio_for_segment, seg, idx): idx
+            for idx, seg in enumerate(segments)
+        }
         for future in futures:
             idx = futures[future]
             audio_paths[idx] = future.result()
-    
+
     for idx, segment in enumerate(segments):
         print(f"[DEBUG] Processing segment {idx+1}/{len(segments)}")
         audio_path = audio_paths[idx]
         audio_clip = AudioFileClip(audio_path)
-        
+
         get_fast_images([segment["image_prompt"]], prefix="", start=idx)
         image_path = f"background/images/{idx}.png"
-        
+
         img = Image.open(image_path)
         target_width, target_height = 1080, 1920
-        gradient = Image.new('RGBA', (target_width, target_height), (0, 0, 0, 0))
+        gradient = Image.new("RGBA", (target_width, target_height), (0, 0, 0, 0))
         gradient_draw = ImageDraw.Draw(gradient)
         gradient_draw.rectangle((0, 0, target_width, target_height), fill=(0, 0, 0, 80))
         img = img.resize((target_width, target_height), Image.LANCZOS)
         img = img.filter(ImageFilter.GaussianBlur(radius=2))
-        img = Image.alpha_composite(img.convert('RGBA'), gradient)
-        
+        img = Image.alpha_composite(img.convert("RGBA"), gradient)
+
         base_clip = ImageClip(np.array(img)).with_duration(audio_clip.duration)
-        text_clip = create_dynamic_text_clip(segment["raw_text"], audio_clip.duration, target_width, 300).with_position(("center", target_height//2))
+        text_clip = create_dynamic_text_clip(
+            segment["raw_text"], audio_clip.duration, target_width, 300
+        ).with_position(("center", target_height // 2))
         final_clip = CompositeVideoClip([base_clip, text_clip])
-        final_clip = final_clip.with_effects([vfx.FadeIn(0.5), vfx.FadeOut(0.5)]).with_audio(audio_clip)
+        final_clip = final_clip.with_effects(
+            [vfx.FadeIn(0.5), vfx.FadeOut(0.5)]
+        ).with_audio(audio_clip)
         video_clips.append(final_clip)
         print(f"[DEBUG] Enhanced segment {idx+1} complete")
-    
+
     quit_browser()
 
     final_video = concatenate_videoclips(video_clips, method="compose")
     return final_video
+
 
 def get_social_content(story):
     """
@@ -215,7 +235,10 @@ Return the result in JSON format:
         return json.loads(json_str)
     except Exception as e:
         print(f"[ERROR] Failed to parse social content JSON: {e}")
-        return {"title": "", "description": "", "pinned_comment": ""}
+        print(f"[ERROR] Retrying...")
+        get_social_content(story)
+        # return {"title": "", "description": "", "pinned_comment": ""}
+
 
 def main(emotion, additional_prompt="", only_descriptor=False):
     print("[DEBUG] Starting AiStoryMaker...")
@@ -223,11 +246,11 @@ def main(emotion, additional_prompt="", only_descriptor=False):
     # Create necessary directories
     os.makedirs("AiStoryMaker/audio", exist_ok=True)
     os.makedirs("AiStoryMaker/output", exist_ok=True)
-    
+
     print("[DEBUG] Story generation started")
     print("Generating story...")
     story = generate_story(emotion, additional_prompt)
-    
+
     descriptors = get_social_content(story)
     print(f"[DEBUG] Social media package generated: {descriptors}")
 
@@ -238,16 +261,16 @@ def main(emotion, additional_prompt="", only_descriptor=False):
     print("Breaking down story into segments...")
     story_data = break_down_story(story)
     print(f"[DEBUG] Story broken down into {len(story_data['segments'])} segments")
-    
+
     print("[DEBUG] Video creation started")
     print("Creating video...")
     final_video = create_video(story_data["segments"])
-    
+
     print("[DEBUG] Saving final video...")
     print("Saving video...")
-    output_path = "AiStoryMaker/output/story.mp4"
+    output_path = f"AiStoryMaker/output/{descriptors.get('title')}.mp4"
     final_video.write_videofile(output_path, fps=24)
-    
+
     print("[DEBUG] Cleaning up temporary files...")
     print("Cleaning up temporary files...")
     cleanup_count = 0
@@ -258,11 +281,74 @@ def main(emotion, additional_prompt="", only_descriptor=False):
         os.remove(f"background/images/{file}")
         cleanup_count += 1
     print(f"[DEBUG] Removed {cleanup_count} temporary files")
-    
+
     print(f"Video saved to {output_path}")
 
-if __name__ == "__main__":
+    return {"video_path": output_path, "social_content": descriptors}
+
+
+emotions = [
+    "Euphoria",
+    "Nostalgia",
+    "Awe",
+    "Satisfaction",
+    "Serenity",
+    "Anticipation",
+    "Wholesomeness",
+    "Triumph",
+    "Surprise",
+    "Empowerment",
+    "Curiosity",
+    "Hope",
+    "Gratitude",
+    "Vulnerability",
+    "Longing",
+    "Melancholy",
+    "Regret",
+    "Hilarity",
+    "Shock",
+    "Relief",
+    "Adrenaline",
+    "Inspiration",
+    "Love",
+    "Contentment",
+    "Tension",
+    "Compassion",
+    "Playfulness",
+    "Defeat",
+    "Resilience",
+    "Shockwave",
+]
+
+
+def generate_unique_additional_prompt(emotion):
+    """
+    Generate a unique additional prompt for the given emotion using Groq,
+    ensuring the resulting story will be intriguing and fun for social media.
+    """
+    prompt = f"""
+Given the emotion '{emotion}', generate an additional prompt, that when given to an AI, that would inspire a captivating, intriguing, and fun short complete story optimized for social media visuals. Provide creative details to inspire engaging storytelling.
+Return just the text.
+	"""
+    return get_text_reply(prompt).strip()
+
+
+def GenerateSinglePost():
     print("[DEBUG] AiStoryMaker script started")
-    emotion = input("Enter the primary emotion for the story: ")
-    additional_prompt = input("Enter any additional requirements (or press Enter to skip): ")
-    main(emotion, additional_prompt, True)
+    emotion = (
+        random.choice(emotions)
+        if random.random() < 0.5
+        else random.choice(emotions) + " and " + random.choice(emotions)
+    )
+    additional_prompt = generate_unique_additional_prompt(emotion)
+    details = main(emotion, additional_prompt)
+    print(details)
+
+
+if __name__ == "__main__":
+    # print("[DEBUG] AiStoryMaker script started")
+    # emotion = input("Enter the primary emotion for the story: ")
+    # additional_prompt = input("Enter any additional requirements (or press Enter to skip): ")
+    # main(emotion, additional_prompt, True)
+    for i in range(1):
+        GenerateSinglePost()
