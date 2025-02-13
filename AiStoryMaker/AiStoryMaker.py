@@ -175,21 +175,37 @@ def create_video(segments):
 
         img = Image.open(image_path)
         target_width, target_height = 1080, 1920
-        gradient = Image.new("RGBA", (target_width, target_height), (0, 0, 0, 0))
-        gradient_draw = ImageDraw.Draw(gradient)
-        gradient_draw.rectangle((0, 0, target_width, target_height), fill=(0, 0, 0, 80))
-        img = img.resize((target_width, target_height), Image.LANCZOS)
-        img = img.filter(ImageFilter.GaussianBlur(radius=2))
-        img = Image.alpha_composite(img.convert("RGBA"), gradient)
+        half_height = target_height // 2
 
-        base_clip = ImageClip(np.array(img)).with_duration(audio_clip.duration)
+        # Create black background for full frame
+        background_clip = ColorClip(size=(target_width, target_height), color=(0, 0, 0)).with_duration(audio_clip.duration)
+
+        # Resize the full image to fit the top half without cropping
+        img_top = img.resize((target_width, half_height), Image.LANCZOS)
+
+        # Apply a gradient and blur effect on the resized image
+        gradient = Image.new("RGBA", (target_width, half_height), (0, 0, 0, 0))
+        gradient_draw = ImageDraw.Draw(gradient)
+        gradient_draw.rectangle((0, 0, target_width, half_height), fill=(0, 0, 0, 80))
+        img_top = img_top.filter(ImageFilter.GaussianBlur(radius=2))
+        img_top = Image.alpha_composite(img_top.convert("RGBA"), gradient)
+        base_clip_top = ImageClip(np.array(img_top)).with_duration(audio_clip.duration)
+
+        # Create dynamic text clip sized and centered to the top half
         text_clip = create_dynamic_text_clip(
-            segment["raw_text"], audio_clip.duration, target_width, 300
-        ).with_position(("center", target_height // 2))
-        final_clip = CompositeVideoClip([base_clip, text_clip])
+            segment["raw_text"], audio_clip.duration, target_width, half_height
+        ).with_position(("center", half_height//2))
+
+        # Composite clips: black background, top image, and text
+        final_clip = CompositeVideoClip([
+            background_clip,
+            base_clip_top.set_position(("center", "top")),
+            text_clip
+        ], size=(target_width, target_height)).with_audio(audio_clip)
+
         final_clip = final_clip.with_effects(
             [vfx.FadeIn(0.5), vfx.FadeOut(0.5)]
-        ).with_audio(audio_clip)
+        )
         video_clips.append(final_clip)
         print(f"[DEBUG] Enhanced segment {idx+1} complete")
 
