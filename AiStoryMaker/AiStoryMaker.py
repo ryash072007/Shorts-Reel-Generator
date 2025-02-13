@@ -177,8 +177,8 @@ def create_video(segments):
         target_width, target_height = 1080, 1920
         half_height = target_height // 2
 
-        # Create black background for full frame
-        background_clip = ColorClip(size=(target_width, target_height), color=(0, 0, 0)).with_duration(audio_clip.duration)
+        # Create transparent background for full frame
+        background_clip = ColorClip(size=(target_width, target_height), color=(0, 0, 0, 0)).with_duration(audio_clip.duration)
 
         # Resize the full image to fit the top half without cropping
         img_top = img.resize((target_width, half_height), Image.LANCZOS)
@@ -216,19 +216,21 @@ def create_video(segments):
     
     # Append the external bottom video clip
     BOTTOM_CLIP_PATH = "reddit2image/gameplay/mcparkour - FPS - Videobolt.net.mp4"  # path to your external bottom video
-    bottom_source = VideoFileClip(BOTTOM_CLIP_PATH).with_fps(4)
+    bottom_source = VideoFileClip(BOTTOM_CLIP_PATH).with_fps(4).with_duration(story_video.duration)
     # Crop the external video: take a vertical slice of height equal to half_height from the center
     crop_y1 = int((bottom_source.h - half_height) / 2)
     crop_y2 = crop_y1 + half_height
-    bottom_cropped = bottom_source.cropped(y1=crop_y1, y2=crop_y2)
+    crop_x1 = int((bottom_source.w - target_width) / 2)
+    crop_x2 = crop_x1 + target_width
+    bottom_cropped = bottom_source.cropped(y1=crop_y1, y2=crop_y2, x1=crop_x1, x2=crop_x2)
     # Resize the cropped video to fill the target width and bottom half height
-    bottom_resized = bottom_cropped.resized(new_size=(target_width, half_height))
+    # bottom_resized = bottom_cropped.resized(new_size=(target_width, half_height))
     # Create black background for full frame and overlay the bottom video at bottom
-    bottom_bg = ColorClip(size=(target_width, target_height), color=(0, 0, 0, 0)).with_duration(bottom_resized.duration)
+    bottom_bg = ColorClip(size=(target_width, target_height), color=(0, 0, 0, 0)) #.with_duration(bottom_resized.duration)
     bottom_composite = CompositeVideoClip([
         bottom_bg,
-        bottom_resized.with_position(("center", "bottom"))
-    ], size=(target_width, target_height))
+        bottom_cropped.with_position(("center", "bottom"))
+    ], size=(target_width, target_height), is_mask=True).with_duration(story_video.duration)
     
     # Concatenate story video with bottom composite for continuous playback
     final_video = concatenate_videoclips([story_video, bottom_composite], method="compose")
