@@ -20,7 +20,7 @@ FONT_SIZE = 140  # Increased base font size
 FONT_PATH = "impact.ttf"  # Change to your preferred font
 TEXT_SHADOW_COLOR = (0, 0, 0, 255)
 TEXT_BACKGROUND_OPACITY = 0  # No background for better readability
-WORD_FADE_DURATION = 0.05
+WORD_FADE_DURATION = 0.001
 SCALE_RANGE = (0.9, 1.1)
 
 
@@ -28,7 +28,7 @@ def generate_story(emotion, additional_prompt=""):
     print(f"[DEBUG] Generating story with emotion: {emotion}")
     if additional_prompt:
         print(f"[DEBUG] Additional prompt: {additional_prompt}")
-    prompt = f"""Create a compelling short story (300-500 words) that primarily evokes the emotion of {emotion}. 
+    prompt = f"""Create a compelling short story (75-125 words) that primarily evokes the emotion of {emotion}. 
     Additional requirements: {additional_prompt}
     
     The story should be vivid, engaging, and suitable for visual storytelling.
@@ -164,7 +164,7 @@ def create_video(segments):
 
     # Generate audio clips concurrently
     audio_paths = [None] * len(segments)
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
             executor.submit(generate_audio_for_segment, seg, idx): idx
             for idx, seg in enumerate(segments)
@@ -269,7 +269,7 @@ def main(emotion, additional_prompt="", only_descriptor=False):
     print("[DEBUG] Saving final video...")
     print("Saving video...")
     output_path = f"AiStoryMaker/output/{descriptors.get('title')}.mp4"
-    final_video.write_videofile(output_path, fps=24)
+    final_video.write_videofile(output_path, fps=4)
 
     print("[DEBUG] Cleaning up temporary files...")
     print("Cleaning up temporary files...")
