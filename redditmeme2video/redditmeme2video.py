@@ -2,7 +2,9 @@ import requests
 from groq import Groq
 import os, time
 
-SUBREDDITS = ["memes", "dankmemes", "wholesomememes", "MinecraftMemes"]
+SUBREDDITS = ["memes", "MinecraftMemes", "wholesomememes"]
+
+MIN_UPVOTES = 2000
 
 GROQCLIENT = Groq(
     api_key=os.environ.get("GROQ_API_KEY"),
@@ -48,6 +50,7 @@ def get_image_reply(text, image_url, _model="llama-3.2-11b-vision-preview"):
             ],
             model=_model,
             response_format={"type": "json_object"},
+            temperature=0.3,
         )
         print("[GROQ] Received response from Groq API")
 
@@ -66,8 +69,8 @@ def get_image_reply(text, image_url, _model="llama-3.2-11b-vision-preview"):
         return get_image_reply(text, image_url)
 
 
-def get_reddit_posts(subreddit="memes"):
-    url = f"https://www.reddit.com/r/{subreddit}/top/.json"
+def get_reddit_posts(subreddit="memes", type = "hot"):
+    url = f"https://www.reddit.com/r/{subreddit}/{type}/.json"
     headers = {
         "User-Agent": "Chrome/133.0.6943.98",
     }
@@ -79,8 +82,11 @@ def get_reddit_posts(subreddit="memes"):
 def get_meme_urls(posts: list):
     meme_urls: list = []
     for post in posts["data"]["children"]:
+        if post["data"].get("url_overridden_by_dest") is None:
+            continue
         if post["data"]["url_overridden_by_dest"].endswith((".jpeg", ".png")):
-            meme_urls.append(post["data"]["url_overridden_by_dest"])
+            if post["data"]["ups"] > MIN_UPVOTES:
+                meme_urls.append(post["data"]["url_overridden_by_dest"])
     return meme_urls
 
 
@@ -89,7 +95,7 @@ if __name__ == "__main__":
     meme_urls = get_meme_urls(posts)[0]
 
     image_reply = get_image_reply(
-        """Analyze the provided image and identify the captions that are part of the meme's intended dialogue or message. Ignore any watermarks, credits, or unrelated text. Do not duplicate any captions.  Determine the natural reading order as a human would perceive it. Then, output the captions in JSON format with an ordered list, as follows:
+        """Analyze the provided image and identify the captions that are part of the meme's intended dialogue or message. You should not have to describe the meme format/image as this is a OCR tool. Only the relevant text on the image has to be processed. Ignore any watermarks, credits, or unrelated text. Do not duplicate any captions.  Determine the natural reading order as a human would perceive it. Then, output the captions in JSON format with an ordered list, as follows:
         {
   "reading_order": [
     "First caption",
@@ -100,4 +106,5 @@ Ensure the order reflects logical reading patterns based on spatial positioning 
 """
     , meme_urls)
 
+    print(meme_urls)
     print(image_reply)
