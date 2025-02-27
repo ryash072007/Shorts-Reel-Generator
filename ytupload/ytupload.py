@@ -6,6 +6,37 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+MEME_TAGS = [
+    "memes",
+    "funny",
+    "viral",
+    "trending",
+    "comedy",
+    "humor",
+    "relatable",
+    "dailymemes",
+    "memesdaily",
+    "dankmemes",
+    "funnymemes",
+    "memestagram",
+    "lol",
+    "jokes",
+    "laugh",
+    "memepage",
+    "funnyvideos",
+    "tiktok",
+    "reels",
+    "ytshorts",
+    "youtubeshorts",
+    "entertainment",
+    "genz",
+    "millennial",
+    "internet",
+    "socialmedia",
+    "minecraft",
+    "mountains",
+    "satisfying",
+]
 
 class YoutubeUploader:
     def __init__(self, credentials_folders):
@@ -82,8 +113,8 @@ class YoutubeUploader:
                         request_body = {
                             "snippet": {
                                 "title": metadata["title"],
-                                "description": metadata["description"]
-                                + " #shorts #youtubeshorts #viral #trending #funny #comedy",
+                                "description": metadata["description"],
+                                "tags": MEME_TAGS + metadata.get("tags", []),
                                 "categoryId": "22",
                             },
                             "status": {

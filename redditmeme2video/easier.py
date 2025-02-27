@@ -13,10 +13,6 @@ from moviepy import *
 
 from multiprocessing import Pool
 
-import edge_tts
-
-VOICE = "en-AU-WilliamNeural"
-
 sys.path.append("rfm")
 from rfm import get_music_path
 
@@ -119,6 +115,7 @@ def get_meme_urls(posts: list):
     for post in posts["data"]["children"]:
         if post["data"].get("url_overridden_by_dest") is None:
             continue
+        # Allow jpg, png, and gif images.
         if post["data"]["url_overridden_by_dest"].endswith((".jpeg", ".png")):
             if post["data"]["ups"] > MIN_UPVOTES:
                 meme_urls.append(
@@ -130,13 +127,24 @@ def get_meme_urls(posts: list):
 
 def generate_audio(text, idx):
     os.makedirs("redditmeme2video/audio", exist_ok=True)
-    
-    output_file = f"redditmeme2video/audio/audio_{idx}.mp3"
+    response = requests.post(
+        "https://api.v7.unrealspeech.com/stream",
+        headers={
+            "Authorization": "Bearer ja2oPEHnKZkJpYU1EPB3IiMnZg3RxABWgFGwQHtAnz92qQL66NWQKE"
+        },
+        json={
+            "Text": text,
+            "VoiceId": "Dan",
+            "Bitrate": "192k",
+            "Speed": "0.3",
+            "Pitch": "1.2",
+            "Codec": "libmp3lame",
+        },
+    )
+    with open(f"redditmeme2video/audio/audio_{idx}.mp3", "wb") as f:
+        f.write(response.content)
 
-    tts = edge_tts.Communicate(text, VOICE)
-    tts.save_sync(output_file)
-
-    return output_file
+    return f"redditmeme2video/audio/audio_{idx}.mp3"
 
 
 def download_image(url, idx):
@@ -215,25 +223,37 @@ def generate_video_clip(image_url, idx=0, captions=None):
     audio_path = generate_audio(". ".join(captions), idx)
 
     meme_path = download_image(image_url, idx)
-    img = Image.open(meme_path)
-
-    # Calculate resize ratio
-    img_ratio = min(T_WIDTH * 0.95 / img.width, T_HEIGHT * 0.95 / img.height)
-    new_size = (int(img.width * img_ratio), int(img.height * img_ratio))
-    img = img.resize(new_size, Image.LANCZOS)
-
-    # Create audio clip
+    ext = os.path.splitext(meme_path)[1].lower()
+    if ext == ".gif":
+        # Process GIF as a video clip.
+        clip = VideoFileClip(meme_path)
+        if clip.duration < AudioFileClip(audio_path).duration:
+            clip = clip.with_effects([vfx.Loop(duration=AudioFileClip(audio_path).duration)])
+        else:
+            clip = clip.subclipped(0, AudioFileClip(audio_path).duration)
+        # Resize clip
+        ratio = min(T_WIDTH * 0.95 / clip.w, T_HEIGHT * 0.95 / clip.h)
+        new_size = (int(clip.w * ratio), int(clip.h * ratio))
+        clip = clip.resized(new_size)
+        # Center on a black background.
+        paste_x = (T_WIDTH - new_size[0]) // 2
+        paste_y = (T_HEIGHT - new_size[1]) // 2
+        background = ColorClip((T_WIDTH, T_HEIGHT), color=(0, 0, 0, 0), duration=AudioFileClip(audio_path).duration)
+        meme_clip = CompositeVideoClip([background, clip.with_position((paste_x, paste_y))])
+    else:
+        # Process regular image.
+        img = Image.open(meme_path)
+        img_ratio = min(T_WIDTH * 0.95 / img.width, T_HEIGHT * 0.95 / img.height)
+        new_size = (int(img.width * img_ratio), int(img.height * img_ratio))
+        img = img.resize(new_size, Image.LANCZOS)
+        meme_bg = Image.new("RGBA", (T_WIDTH, T_HEIGHT), (0, 0, 0, 0))
+        paste_x = (T_WIDTH - new_size[0]) // 2
+        paste_y = (T_HEIGHT - new_size[1]) // 2
+        meme_bg.paste(img, (paste_x, paste_y))
+        meme_clip = ImageClip(np.array(meme_bg)).with_duration(AudioFileClip(audio_path).duration)
+        
+    # Apply fade effects and attach audio.
     audio_clip = AudioFileClip(audio_path)
-
-    # Create meme clip
-    meme_bg = Image.new("RGBA", (T_WIDTH, T_HEIGHT), (0, 0, 0, 0))
-    paste_x = (T_WIDTH - new_size[0]) // 2
-    paste_y = (T_HEIGHT - new_size[1]) // 2
-    meme_bg.paste(img, (paste_x, paste_y))
-
-    meme_clip = ImageClip(np.array(meme_bg)).with_duration(audio_clip.duration)
-
-    # Create Video with effects based on idx
     if idx == 0:
         final_clip = CompositeVideoClip(
             [meme_clip.with_effects([vfx.FadeOut(0.05)])]
@@ -269,7 +289,7 @@ def generate_final_video(
 Given the following image:
     
 Generate a social media package that includes:
-- Title: A funny interesting, maybe exaggerated or controversial, title for the meme (make sure you understand the meme). Add tags at the end. Make sure it is not longer than 80 characters.
+- Title: A funny interesting, maybe exaggerated, title for the meme (make sure you understand the meme). Add tags at the end.
 
 Return the result in JSON format:
 {{
@@ -279,9 +299,14 @@ Return the result in JSON format:
     print(f"[TITLE] {title}")
     clips = []
     for idx, meme_url in enumerate(pre_meme_urls):
-        clips.append(generate_video_clip(meme_url[0], idx, captions=pre_captions[idx]))
+        subclip = generate_video_clip(meme_url[0], idx, captions=pre_captions[idx])
+        if idx == len(pre_meme_urls) - 1:
+            subclip = subclip.with_effects([vfx.CrossFadeOut(0.5)])
+        clips.append(subclip)
         comment += f" u/{meme_url[1]},"
     comment = comment[:-1] + " for the memes!"
+    outro = VideoFileClip("redditmeme2video/outro.mp4").with_fps(FPS)
+    clips.append(outro)
     final_video = concatenate_videoclips(clips)
     # ...existing code for background video processing...
     gameplay_dir = "redditmeme2video/gameplay"
@@ -352,19 +377,19 @@ NOW = False
 
 SUBREDDITS = [
     "memes",
-    # "Animemes",
 ]
 
 SUBREDDITSLIST = [
+    "wholesomememes",
+    "HistoryMemes",
+    "memes",
+    "Animemes",
     "HistoryMemes",
     "MinecraftMemes",
-    "wholesomememes",
-    "memes",
-    "HistoryMemes",
     "RelationshipMemes",
 ]
 
-MIN_UPVOTES = 1000  # For RelationshipMemes
+MIN_UPVOTES = 5000  # For RelationshipMemes
 # MIN_UPVOTES = 3000
 
 

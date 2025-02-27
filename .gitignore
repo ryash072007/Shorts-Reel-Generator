@@ -6,9 +6,6 @@ __pycache__/
 *.mp4
 *.webm
 
-*.mp4
-*.webm
-
 *.json
 # C extensions
 *.so

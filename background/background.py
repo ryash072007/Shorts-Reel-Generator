@@ -4,6 +4,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 import requests
 from time import sleep
 import base64
+import cloudscraper
 
 driver_path = (
     r"e:\GitHub\Shorts-Reel-Generator\background\chromedriver-win64\chromedriver.exe"
@@ -12,8 +13,12 @@ brave_path = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.ex
 
 option = webdriver.ChromeOptions()
 option.binary_location = brave_path
+option.add_argument("--no-sandbox")
+option.add_argument("--disable-dev-shm-usage")
+option.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+option.add_argument("user-data-dir='C:\\Users\\ryash\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data\\Profile 2'")
 # option.add_argument("--tor")
-option.add_argument("--headless")
+# option.add_argument("--headless")
 
 service = webdriver.ChromeService(executable_path=driver_path)
 
@@ -23,10 +28,12 @@ browser: webdriver.Chrome = None
 def init():
     global browser, option, service
     browser = webdriver.Chrome(options=option, service=service)
+    # scraper = cloudscraper.create_scraper(browser)
     browser.implicitly_wait(30)
     # browser.get("https://www.artbreeder.com/tools/prompter")
     # browser.get("https://lorastudio.co/generate?model=artificialguybr/LineAniRedmond-LinearMangaSDXL-V2")
-    browser.get("https://lorastudio.co/generate?model=KappaNeuro/makoto-shinkai-style")
+    # browser.get("https://lorastudio.co/generate?model=KappaNeuro/makoto-shinkai-style")
+    browser.get("https://luvvoice.com/")
 
 
 def quit_browser():
@@ -187,4 +194,6 @@ def save_image(url: str, name: str):
 
 
 if __name__ == "__main__":
-    get_bing_images(["a storyboard for a short film", "a dragon flying high"])
+    init()
+    while True:
+        pass
