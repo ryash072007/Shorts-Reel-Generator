@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+*.mp4
+*.webm
+
+*.mp4
+*.webm
+
 *.json
 # C extensions
 *.so
