@@ -396,20 +396,31 @@ class MediaProcessor:
         # Load the meme image
         meme_img = Image.open(image_path)
         
-        # Calculate frame dimensions - make it larger to fill more screen space
-        frame_width = int(TARGET_WIDTH * 0.95)  # Use 95% of screen width instead of limiting it
+        # Define padding and margins
+        side_padding = 40
+        min_frame_width = int(TARGET_WIDTH * 0.7)  # Minimum frame width (70% of screen)
+        max_frame_width = int(TARGET_WIDTH * 0.98)  # Maximum frame width (98% of screen)
         
-        # Resize meme if too large while maintaining aspect ratio
-        if meme_img.width > frame_width - 40:
-            ratio = (frame_width - 40) / meme_img.width
-            new_width = int(meme_img.width * ratio)
-            new_height = int(meme_img.height * ratio)
-            meme_img = meme_img.resize((new_width, new_height), Image.LANCZOS)
+        # Calculate optimal meme size with better screen utilization
+        # Start by calculating how large we can make the meme while maintaining aspect ratio
+        scale_factor = min(max_frame_width / (meme_img.width + side_padding*2), 
+                          TARGET_HEIGHT * 0.7 / meme_img.height)  # Ensure height isn't too tall
+        
+        # Apply scale factor to get new meme dimensions
+        new_meme_width = int(meme_img.width * scale_factor)
+        new_meme_height = int(meme_img.height * scale_factor)
+        
+        # Resize meme with the calculated dimensions
+        meme_img = meme_img.resize((new_meme_width, new_meme_height), Image.LANCZOS)
+        
+        # Calculate frame width based on meme width plus padding
+        frame_width = max(min_frame_width, new_meme_width + side_padding*2)
+        frame_width = min(frame_width, max_frame_width)  # Cap at maximum width
         
         # Create frame with right dimensions for the header, image, and footer
-        header_height = 90  # Reduced from 100 to 90 since we're removing one line of text
-        footer_height = 60   # Unchanged
-        frame_height = header_height + meme_img.height + footer_height
+        header_height = 90  # For username and title
+        footer_height = 60  # For social metrics
+        frame_height = header_height + new_meme_height + footer_height
         
         # Create the frame with theme-appropriate background
         frame = Image.new("RGBA", (frame_width, frame_height), self.theme["card_bg"])
@@ -423,17 +434,20 @@ class MediaProcessor:
         profile_pic = Image.open(self.reddit_logo_path).convert("RGBA")
         profile_pic = self._create_circular_mask(profile_pic.resize((55, 55)))  # Bigger profile pic
         
-        # Add profile pic to frame
-        frame.paste(profile_pic, (25, 20), profile_pic)
+        # Add profile pic to frame - keep at left edge
+        profile_x = 20
+        frame.paste(profile_pic, (profile_x, 20), profile_pic)
         
-        # Add only username (remove subreddit line)
-        draw.text((90, 35), f"u/{username}", fill=self.theme["text_secondary"], font=self.username_font)
+        # Add username - moved to the right to avoid overlap
+        username_x = profile_x + 65  # Increased from 90 to create more space
+        draw.text((username_x, 35), f"u/{username}", fill=self.theme["text_secondary"], font=self.username_font)
         
         # Add title text - keep it short with ellipsis if too long
         title_short = title if len(title) < 60 else title[:57] + "..."  # Allow longer titles
         
-        # Create multi-line title for better readability
-        title_width = frame_width - 100  # Leave some margin
+        # Create multi-line title for better readability - with increased left margin
+        title_x = username_x  # Align with username to avoid profile pic
+        title_width = frame_width - title_x - 20  # Leave right margin
         title_lines = []
         line = ""
         for word in title_short.split():
@@ -447,18 +461,18 @@ class MediaProcessor:
         if line:
             title_lines.append(line)
         
-        # Draw multi-line title - adjust position since we removed one text line
-        title_y = header_height - 10 - (len(title_lines) * self.title_font.size)
+        # Draw multi-line title - adjusted position
+        title_y = header_height - 15 - (len(title_lines) * self.title_font.size)
         for i, line in enumerate(title_lines):
-            draw.text((25, title_y + i * self.title_font.size * 1.2), 
+            draw.text((title_x, title_y + i * self.title_font.size * 1.2), 
                      line, fill=self.theme["text_primary"], font=self.title_font)
         
         # Center the meme image in the frame
-        meme_x = (frame_width - meme_img.width) // 2
+        meme_x = (frame_width - new_meme_width) // 2
         frame.paste(meme_img, (meme_x, header_height))
         
         # Add social engagement metrics with random realistic numbers
-        icon_y = header_height + meme_img.height + 15
+        icon_y = header_height + new_meme_height + 15
         upvotes = random.randint(5000, 50000)
         comments = random.randint(100, 2000)
         
