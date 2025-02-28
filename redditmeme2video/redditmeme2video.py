@@ -269,7 +269,7 @@ class MediaProcessor:
     
     def _get_theme_colors(self, dark_mode: bool) -> Dict[str, Any]:
         """Get color scheme based on dark/light mode preference."""
-        if dark_mode:
+        if (dark_mode):
             return {
                 "background": (30, 30, 30, 255),  # Dark gray
                 "card_bg": (39, 39, 41, 255),     # Reddit dark mode card
@@ -697,29 +697,17 @@ class VideoGenerator:
         framed_path = f"redditmeme2video/images/framed_meme_{idx}.png"
         framed_img.save(framed_path)
         
-        # Create base video clip - completely static, no effects
+        # Create base video clip from the image
         meme_clip = ImageClip(np.array(framed_img)).with_duration(audio_clip.duration)
         
-        # Apply different effects based on position in sequence - only transitions
-        if idx == 0:
-            final_clip = CompositeVideoClip([meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.2)])]).with_audio(audio_clip)
-        else:
-            # Middle clips: different transitions based on level
-            if self.use_advanced_transitions and idx % 3 == 0:  
-                final_clip = CompositeVideoClip(
-                    [meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.2)])]
-                ).with_audio(audio_clip)
-            elif self.use_advanced_transitions and idx % 3 == 1:
-                final_clip = CompositeVideoClip(
-                    [meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.2)])]
-                ).with_audio(audio_clip)
-            else:
-                final_clip = CompositeVideoClip(
-                    [meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.3)])]
-                ).with_audio(audio_clip)
-            
+        # Apply audio to the clip
+        final_clip = meme_clip.with_audio(audio_clip)
+        
+        # Add fade effects for smoother transitions
+        final_clip = final_clip.with_effects([vfx.FadeIn(0.2), vfx.FadeOut(0.2)])
+        
         return final_clip
-
+    
     def generate_clips_in_parallel(self, meme_urls, pre_captions):
         """Generate clips in parallel using thread pool."""
         futures = []
