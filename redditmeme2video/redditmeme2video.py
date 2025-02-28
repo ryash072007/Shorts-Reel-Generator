@@ -986,7 +986,7 @@ def main():
         subreddits=["memes"],
         min_upvotes=1000,
         auto_mode=False,
-        use_background_music=False  # Enable background music by default
+        use_background_music=True  # Enable background music by default
     )
     
     # Initialize components
