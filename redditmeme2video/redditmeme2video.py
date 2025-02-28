@@ -505,18 +505,12 @@ class MediaProcessor:
         draw.text((frame_width - time_width - 20, icon_y), time_ago, 
                  fill=self.theme["text_secondary"], font=self.username_font)
         
-        # Add theme-specific shadow effect
-        frame = self._add_border_shadow(frame, opacity=self.theme["shadow_opacity"])
-        
         # Create final image to place the frame on (transparent background for compositing)
         final_image = Image.new("RGBA", (TARGET_WIDTH, TARGET_HEIGHT), (0, 0, 0, 0))
         
-        # Center the frame
+        # Center the frame horizontally and vertically (removed the -150 vertical offset)
         paste_x = (TARGET_WIDTH - frame_width) // 2
-        
-        # Position the frame slightly higher on screen - adjust to work well with panning
-        paste_y = (TARGET_HEIGHT - frame_height) // 2 - 150  # Shifted higher (from -100 to -150)
-        paste_y = max(50, paste_y)  # Ensure it's not too high
+        paste_y = (TARGET_HEIGHT - frame_height) // 2  # Truly centered vertically
         
         final_image.paste(frame, (paste_x, paste_y), frame)
         
@@ -565,19 +559,6 @@ class MediaProcessor:
         result = image.copy()
         result.putalpha(mask)
         return result
-    
-    def _add_border_shadow(self, image: Image.Image, opacity: int = 100) -> Image.Image:
-        """Add a subtle shadow effect to make the frame pop."""
-        # Create a slightly larger black background for shadow
-        shadow = Image.new("RGBA", (image.width + 12, image.height + 12), (0, 0, 0, opacity))
-        shadow = shadow.filter(ImageFilter.GaussianBlur(8))
-        
-        # Place the original image on top of shadow
-        result = Image.new("RGBA", shadow.size, (0, 0, 0, 0))
-        result.paste(shadow, (0, 0), shadow)
-        result.paste(image, (6, 6), image)
-        
-        return result
 
 
 class VideoGenerator:
@@ -591,16 +572,16 @@ class VideoGenerator:
         self.threads = []
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
         
-        # Configuration for transitions and effects (not animations)
+        # Configuration for transitions only
         if config.animation_level == "low":
             self.use_advanced_transitions = False
-            self.use_vignette = False
         elif config.animation_level == "medium":
             self.use_advanced_transitions = True
-            self.use_vignette = False
         else:  # high
             self.use_advanced_transitions = True
-            self.use_vignette = True
+            
+        # Disable vignette effect completely
+        self.use_vignette = False
     
     def collect_captions(self, subreddit: str, amount: int = 3, 
                        post_type: str = "hot", retry: bool = False) -> Tuple[List[Tuple[str, str, str]], List[List[str]]]:
@@ -716,10 +697,10 @@ class VideoGenerator:
         framed_path = f"redditmeme2video/images/framed_meme_{idx}.png"
         framed_img.save(framed_path)
         
-        # Create base video clip - completely static
+        # Create base video clip - completely static, no effects
         meme_clip = ImageClip(np.array(framed_img)).with_duration(audio_clip.duration)
         
-        # Apply different effects based on position in sequence - only transitions, no animations
+        # Apply different effects based on position in sequence - only transitions
         if idx == 0:
             final_clip = CompositeVideoClip([meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.2)])]).with_audio(audio_clip)
         else:
@@ -860,39 +841,7 @@ class VideoGenerator:
         # Composite final video with background and audio - completely static
         final_composite = CompositeVideoClip(composite_layers)
         
-        # Apply vignette effect if enabled (doesn't create animation, just a visual effect)
-        if self.use_vignette:
-            def vignette_effect(get_frame, t):
-                frame = get_frame(t)
-                height, width = frame.shape[:2]
-                Y, X = np.ogrid[:height, :width]
-                center_x, center_y = width / 2, height / 2
-                
-                # Calculate distance from center
-                dist_from_center = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
-                # Normalize distance
-                max_dist = np.sqrt(center_x**2 + center_y**2)
-                
-                # Create subtle vignette
-                vignette = np.clip(1 - dist_from_center / max_dist, 0, 1)
-                vignette = vignette * 0.15 + 0.85  # 85% minimum brightness
-                
-                if frame.ndim == 3:
-                    if frame.shape[2] == 4:
-                        rgb = frame[:, :, :3] * np.dstack([vignette, vignette, vignette])
-                        alpha = frame[:, :, 3]
-                        frame = np.dstack((rgb, alpha))
-                    else:
-                        frame = frame * np.dstack([vignette, vignette, vignette])
-                else:
-                    frame = frame * vignette
-                    
-                return np.clip(frame, 0, 255).astype('uint8')
-            
-            # Apply vignette
-            final_composite = final_composite.transform(vignette_effect, apply_to="mask")
-        
-        # Write video to file
+        # Write video to file (no vignette effect applied)
         output_path = f"{output_location}/final_video.mp4"
         
         # Use threading for writing the video file
