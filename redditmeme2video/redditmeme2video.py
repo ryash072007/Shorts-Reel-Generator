@@ -53,35 +53,30 @@ logger = logging.getLogger("redditmeme2video")
 # Constants
 TARGET_WIDTH, TARGET_HEIGHT = 1080, 1920
 FPS = 30
-DEFAULT_MIN_UPVOTES = 3000
-DEFAULT_VOICE = "en-AU-WilliamNeural"
-DEFAULT_RATE = "+30%"
-DEFAULT_PITCH = "+20Hz"
-MEMES_PER_VIDEO = 1  # Number of memes per video
+DEFAULT_MIN_UPVOTES = 3000  # Minimum upvotes for memes
+MEMES_PER_VIDEO = 3  # Number of memes per video
 
 # AI prompt templates
 GENERATE_CAPTION_PROMPT = \
 """
 Task:
-Analyze the given image and extract captions that contribute to the meme’s intended humor, dialogue, or message. Instead of merely reading the text verbatim, interpret the meme’s context to generate captions that enhance its comedic or expressive intent.
+Analyze the given image with the given reddit title {post_title} and return captions that contribute to the meme’s intended humor, dialogue, or message. Instead of merely reading the text verbatim, interpret the meme’s context to generate captions that enhance its comedic or expressive intent.
 
 Guidelines:
 
 Context-Aware Extraction: Identify and refine the captions to best align with the meme’s meaning. Do not simply transcribe text—ensure the extracted captions are highly relevant to the joke or intended message.
 Ignore Unrelated Elements: Exclude watermarks, credits, or any extraneous text.
 Maintain Natural Flow: Determine the logical reading order as a human would, prioritizing spatial positioning and conversational structure.
-Expressive SSML Output: Format the extracted captions in highly expressive SSML (Speech Synthesis Markup Language) to enhance comedic or emotional impact when read aloud.
+Expressive SSML Output: Format the extracted captions in very highly expressive SSML (Speech Synthesis Markup Language) to enhance comedic or emotional impact when read aloud.
 Output Format (JSON with SSML):
 
-json
-Copy
-Edit
-{
+example json
+{{
   "reading_order": [
     "<speak><prosody rate='fast' pitch='high'>First caption!</prosody></speak>",
     "<speak><break time='500ms'/> <prosody volume='loud'>Second caption?!</prosody></speak>"
   ]
-}
+}}
 Possible SSML Tags to Use:
 
 <speak>: Wraps the spoken text.
@@ -94,7 +89,7 @@ Possible SSML Tags to Use:
 <s>: Defines a sentence for pauses between sentences.
 <phoneme>: Specifies how to pronounce a specific word.
 <sub>: Substitutes a word or phrase for easier understanding.
-Ensure variation in tone, pitch, and speed to match the meme’s mood—whether it’s sarcasm, excitement, or frustration.
+Ensure variation in tone, pitch, speed, stress on the word to match the meme’s mood—whether it’s sarcasm, excitement, or frustration.
 """
 
 GENERATE_TITLE_PROMPT = """
@@ -702,7 +697,9 @@ class VideoGenerator:
             # Process captions in parallel using thread pool
             def process_meme(idx_url):
                 idx, (meme_url, author, title) = idx_url
-                image_reply = self.ai_client.get_image_analysis(GENERATE_CAPTION_PROMPT, meme_url)
+                # Format the prompt with the actual post title for better context
+                formatted_prompt = GENERATE_CAPTION_PROMPT.format(post_title=title)
+                image_reply = self.ai_client.get_image_analysis(formatted_prompt, meme_url)
                 captions = image_reply["reading_order"]
                 return idx, captions
             
@@ -764,7 +761,9 @@ class VideoGenerator:
         
         # Get captions if not provided
         if captions is None:
-            image_reply = self.ai_client.get_image_analysis(GENERATE_CAPTION_PROMPT, image_url)
+            # Also format the prompt here with title context
+            formatted_prompt = GENERATE_CAPTION_PROMPT.format(post_title=title)
+            image_reply = self.ai_client.get_image_analysis(formatted_prompt, image_url)
             captions = image_reply["reading_order"]
             
         # Process captions: trim punctuation
@@ -984,7 +983,7 @@ def main():
     """Main entry point."""
     # Load configuration with more options
     config = Config(
-        subreddits=["HistoryMemes"],
+        subreddits=["memes"],
         min_upvotes=1000,
         auto_mode=False,
         use_background_music=False  # Enable background music by default
