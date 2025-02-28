@@ -141,7 +141,7 @@ class AIClient:
     
     def get_image_analysis(self, prompt: str, image_url: str, 
                          model: str = "llama-3.2-11b-vision-preview") -> Dict[str, Any]:
-        """Analyze image using AI vision model with caching."""
+        """Analyze image using AI vision model with caching. The 11b model works better than the 11b version."""
         # Check cache
         cache_key = f"{model}:{prompt}:{image_url}"
         if cache_key in self._cache:
