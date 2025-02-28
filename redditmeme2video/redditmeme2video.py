@@ -18,13 +18,15 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+from io import BytesIO
 
 import edge_tts
 import numpy as np
 import requests
 from groq import Groq
 from moviepy import *
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL.ImageOps import expand
 
 # Add rfm module to path
 sys.path.append("rfm")
@@ -42,7 +44,7 @@ TARGET_WIDTH, TARGET_HEIGHT = 1080, 1920
 FPS = 30
 DEFAULT_MIN_UPVOTES = 3000
 DEFAULT_VOICE = "en-AU-WilliamNeural"
-DEFAULT_RATE = "+20%"
+DEFAULT_RATE = "+30%"
 DEFAULT_PITCH = "+20Hz"
 
 # AI prompt templates
@@ -59,7 +61,7 @@ GENERATE_TITLE_PROMPT = """
 Given the following image:
     
 Generate a social media package that includes:
-- Title: A funny interesting, maybe exaggerated or controversial, title for the meme (make sure you understand the meme). Add tags at the end. Make sure it is not longer than 80 characters.
+- Title: A funny interesting, maybe exaggerated or controversial, title for the meme (make sure you understand the meme). Add tags at the end. Make sure it is not longer than 40 characters.
 
 Return the result in JSON format:
 {
@@ -78,6 +80,8 @@ class Config:
     rate: str = DEFAULT_RATE
     pitch: str = DEFAULT_PITCH
     output_dir: str = "redditmeme2video/output"
+    dark_mode: bool = True  # Default to dark mode for modern appeal
+    animation_level: str = "high"  # Options: "low", "medium", "high"
     
     @classmethod
     def from_env(cls) -> "Config":
@@ -91,6 +95,8 @@ class Config:
             rate=os.environ.get("TTS_RATE", DEFAULT_RATE),
             pitch=os.environ.get("TTS_PITCH", DEFAULT_PITCH),
             output_dir=os.environ.get("OUTPUT_DIR", "redditmeme2video/output"),
+            dark_mode=os.environ.get("DARK_MODE", "1") == "1",
+            animation_level=os.environ.get("ANIMATION_LEVEL", "high"),
         )
 
 
@@ -215,13 +221,15 @@ class RedditClient:
         return response.json()
     
     @staticmethod
-    def filter_meme_urls(posts: Dict[str, Any], min_upvotes: int) -> List[Tuple[str, str]]:
-        """Extract meme URLs and authors from Reddit posts."""
+    def filter_meme_urls(posts: Dict[str, Any], min_upvotes: int) -> List[Tuple[str, str, str]]:
+        """Extract meme URLs, authors, and titles from Reddit posts."""
         meme_urls = []
         for post in posts["data"]["children"]:
             url = post["data"].get("url_overridden_by_dest")
             if url and url.endswith((".jpeg", ".png")) and post["data"]["ups"] > min_upvotes:
-                meme_urls.append((url, post["data"]["author"]))
+                title = post["data"]["title"]
+                author = post["data"]["author"]
+                meme_urls.append((url, author, title))
         
         random.shuffle(meme_urls)
         logger.info(f"Found {len(meme_urls)} valid meme URLs")
@@ -236,11 +244,94 @@ class MediaProcessor:
         self.config = config
         self.image_dir = Path("redditmeme2video/images")
         self.audio_dir = Path("redditmeme2video/audio")
+        self.assets_dir = Path("redditmeme2video/assets")
         self.image_dir.mkdir(exist_ok=True, parents=True)
         self.audio_dir.mkdir(exist_ok=True, parents=True)
+        self.assets_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Theme colors
+        self.theme = self._get_theme_colors(config.dark_mode)
+        
+        # Download or prepare Reddit logo for profile pic if not exists
+        self.reddit_logo_path = self.assets_dir / "reddit_logo.png"
+        if not self.reddit_logo_path.exists():
+            self._prepare_reddit_logo()
+            
+        # Try to load fonts, use default if not available
+        self.title_font = self._load_font(26, bold=True)  # Increased for better readability
+        self.username_font = self._load_font(20)  # Increased for better readability
         self._session = requests.Session()  # Reuse session for downloads
         self._download_lock = threading.Lock()  # Lock for thread-safe downloads
         self._audio_lock = threading.Lock()  # Lock for thread-safe audio generation
+    
+    def _get_theme_colors(self, dark_mode: bool) -> Dict[str, Any]:
+        """Get color scheme based on dark/light mode preference."""
+        if dark_mode:
+            return {
+                "background": (30, 30, 30, 255),  # Dark gray
+                "card_bg": (39, 39, 41, 255),     # Reddit dark mode card
+                "text_primary": (255, 255, 255),  # White text
+                "text_secondary": (160, 160, 160),# Light gray text
+                "accent": (255, 69, 0),           # Reddit orange
+                "upvote": (255, 69, 0),           # Orange upvote
+                "downvote": (113, 147, 255),      # Periwinkle downvote
+                "comment": (79, 188, 255),        # Blue comment
+                "share": (46, 204, 113),          # Green share
+                "shadow_opacity": 150,            # Darker shadow for dark mode
+                "rounded_radius": 15,             # Round corners
+            }
+        else:
+            return {
+                "background": (255, 255, 255, 255), # White
+                "card_bg": (255, 255, 255, 255),    # Reddit light mode card
+                "text_primary": (0, 0, 0),          # Black text
+                "text_secondary": (120, 120, 120),  # Gray text
+                "accent": (255, 69, 0),             # Reddit orange
+                "upvote": (255, 69, 0),             # Orange upvote
+                "downvote": (113, 147, 255),        # Periwinkle downvote
+                "comment": (0, 121, 211),           # Blue comment
+                "share": (46, 204, 113),            # Green share
+                "shadow_opacity": 80,               # Lighter shadow for light mode
+                "rounded_radius": 15,               # Round corners
+            }
+    
+    def _load_font(self, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+        """Load font for image text. Falls back to default font if custom not available."""
+        try:
+            # Try to use Arial or another common font
+            if bold:
+                return ImageFont.truetype("arial.ttf", size=size, encoding="unic")
+            else:
+                return ImageFont.truetype("arial.ttf", size=size, encoding="unic")
+        except (IOError, OSError):
+            # Fall back to default font
+            return ImageFont.load_default()
+    
+    def _prepare_reddit_logo(self):
+        """Download and prepare Reddit logo for use as profile pic."""
+        try:
+            # Reddit logo URL
+            logo_url = "https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png"
+            response = requests.get(logo_url)
+            if response.status_code == 200:
+                img = Image.open(BytesIO(response.content))
+                # Resize to profile picture size and convert to circular
+                img = img.resize((40, 40))
+                # Save
+                img.save(self.reddit_logo_path)
+            else:
+                # Create a simple placeholder
+                img = Image.new("RGB", (40, 40), (255, 69, 0))  # Reddit orange
+                draw = ImageDraw.Draw(img)
+                draw.text((20, 20), "R", fill="white", anchor="mm", font=self._load_font(24, bold=True))
+                img.save(self.reddit_logo_path)
+        except Exception as e:
+            logger.error(f"Error preparing Reddit logo: {e}")
+            # Create a simple placeholder
+            img = Image.new("RGB", (40, 40), (255, 69, 0))  # Reddit orange
+            draw = ImageDraw.Draw(img)
+            draw.text((20, 20), "R", fill="white", anchor="mm", font=self._load_font(24, bold=True))
+            img.save(self.reddit_logo_path)
         
     def download_image(self, url: str, idx: int) -> Optional[str]:
         """Download image from URL and save locally."""
@@ -299,6 +390,173 @@ class MediaProcessor:
                             logger.warning(f"Could not delete {file_path}, file in use")
         except Exception as e:
             logger.error(f"Error cleaning temporary files: {e}")
+        
+    def create_social_media_frame(self, image_path: str, title: str, username: str) -> Image.Image:
+        """Create a Reddit-like frame around the image with post title."""
+        # Load the meme image
+        meme_img = Image.open(image_path)
+        
+        # Calculate frame dimensions - make it larger to fill more screen space
+        frame_width = int(TARGET_WIDTH * 0.95)  # Use 95% of screen width instead of limiting it
+        
+        # Resize meme if too large while maintaining aspect ratio
+        if meme_img.width > frame_width - 40:
+            ratio = (frame_width - 40) / meme_img.width
+            new_width = int(meme_img.width * ratio)
+            new_height = int(meme_img.height * ratio)
+            meme_img = meme_img.resize((new_width, new_height), Image.LANCZOS)
+        
+        # Create frame with right dimensions for the header, image, and footer
+        header_height = 90  # Reduced from 100 to 90 since we're removing one line of text
+        footer_height = 60   # Unchanged
+        frame_height = header_height + meme_img.height + footer_height
+        
+        # Create the frame with theme-appropriate background
+        frame = Image.new("RGBA", (frame_width, frame_height), self.theme["card_bg"])
+        draw = ImageDraw.Draw(frame)
+        
+        # Add rounded corners to the frame
+        frame = self._add_rounded_corners(frame, self.theme["rounded_radius"])
+        draw = ImageDraw.Draw(frame)
+        
+        # Load profile picture (Reddit logo)
+        profile_pic = Image.open(self.reddit_logo_path).convert("RGBA")
+        profile_pic = self._create_circular_mask(profile_pic.resize((55, 55)))  # Bigger profile pic
+        
+        # Add profile pic to frame
+        frame.paste(profile_pic, (25, 20), profile_pic)
+        
+        # Add only username (remove subreddit line)
+        draw.text((90, 35), f"u/{username}", fill=self.theme["text_secondary"], font=self.username_font)
+        
+        # Add title text - keep it short with ellipsis if too long
+        title_short = title if len(title) < 60 else title[:57] + "..."  # Allow longer titles
+        
+        # Create multi-line title for better readability
+        title_width = frame_width - 100  # Leave some margin
+        title_lines = []
+        line = ""
+        for word in title_short.split():
+            test_line = line + " " + word if line else word
+            # Estimate text width - varies by font
+            if len(test_line) * (self.title_font.size * 0.6) < title_width:
+                line = test_line
+            else:
+                title_lines.append(line)
+                line = word
+        if line:
+            title_lines.append(line)
+        
+        # Draw multi-line title - adjust position since we removed one text line
+        title_y = header_height - 10 - (len(title_lines) * self.title_font.size)
+        for i, line in enumerate(title_lines):
+            draw.text((25, title_y + i * self.title_font.size * 1.2), 
+                     line, fill=self.theme["text_primary"], font=self.title_font)
+        
+        # Center the meme image in the frame
+        meme_x = (frame_width - meme_img.width) // 2
+        frame.paste(meme_img, (meme_x, header_height))
+        
+        # Add social engagement metrics with random realistic numbers
+        icon_y = header_height + meme_img.height + 15
+        upvotes = random.randint(5000, 50000)
+        comments = random.randint(100, 2000)
+        
+        # Add upvote arrow and count
+        draw.polygon([(30, icon_y+12), (40, icon_y), (50, icon_y+12)], fill=self.theme["upvote"])
+        draw.text((60, icon_y), self._format_number(upvotes), 
+                 fill=self.theme["text_primary"], font=self.username_font)
+        
+        # Add comment icon and count
+        comment_x = 150
+        draw.ellipse((comment_x, icon_y, comment_x+20, icon_y+20), fill=self.theme["comment"])
+        draw.text((comment_x+30, icon_y), self._format_number(comments), 
+                 fill=self.theme["text_primary"], font=self.username_font)
+        
+        # Add share icon
+        share_x = 250
+        draw.ellipse((share_x, icon_y, share_x+20, icon_y+20), fill=self.theme["share"])
+        draw.text((share_x+30, icon_y), "Share", 
+                 fill=self.theme["text_primary"], font=self.username_font)
+        
+        # Add time posted
+        time_ago = f"{random.randint(2, 23)}h ago"
+        time_width = self.username_font.getsize(time_ago)[0] if hasattr(self.username_font, 'getsize') else 80
+        draw.text((frame_width - time_width - 20, icon_y), time_ago, 
+                 fill=self.theme["text_secondary"], font=self.username_font)
+        
+        # Add theme-specific shadow effect
+        frame = self._add_border_shadow(frame, opacity=self.theme["shadow_opacity"])
+        
+        # Create final image to place the frame on (transparent background for compositing)
+        final_image = Image.new("RGBA", (TARGET_WIDTH, TARGET_HEIGHT), (0, 0, 0, 0))
+        # Center the frame
+        paste_x = (TARGET_WIDTH - frame_width) // 2
+        
+        # Position the frame at a better vertical position - slightly higher on screen
+        paste_y = (TARGET_HEIGHT - frame_height) // 2 - 100  # Shifted up by 100px
+        paste_y = max(50, paste_y)  # Ensure it's not too high
+        
+        final_image.paste(frame, (paste_x, paste_y), frame)
+        
+        return final_image
+    
+    def _format_number(self, num: int) -> str:
+        """Format large numbers in a social media style (e.g. 12.5k)."""
+        if num >= 1000000:
+            return f"{num/1000000:.1f}M"
+        elif num >= 1000:
+            return f"{num/1000:.1f}k"
+        else:
+            return str(num)
+    
+    def _add_rounded_corners(self, image: Image.Image, radius: int) -> Image.Image:
+        """Add rounded corners to an image."""
+        circle = Image.new('L', (radius * 2, radius * 2), 0)
+        draw = ImageDraw.Draw(circle)
+        draw.ellipse((0, 0, radius * 2, radius * 2), fill=255)
+        
+        result = image.copy()
+        width, height = image.size
+        
+        # Create a mask for rounded corners
+        mask = Image.new('L', image.size, 255)
+        
+        # Top left
+        mask.paste(circle.crop((0, 0, radius, radius)), (0, 0))
+        # Top right
+        mask.paste(circle.crop((radius, 0, radius * 2, radius)), (width - radius, 0))
+        # Bottom left
+        mask.paste(circle.crop((0, radius, radius, radius * 2)), (0, height - radius))
+        # Bottom right
+        mask.paste(circle.crop((radius, radius, radius * 2, radius * 2)), (width - radius, height - radius))
+        
+        result.putalpha(mask)
+        return result
+    
+    def _create_circular_mask(self, image: Image.Image) -> Image.Image:
+        """Create a circular mask for profile pictures."""
+        width, height = image.size
+        mask = Image.new("L", (width, height), 0)
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse((0, 0, width, height), fill=255)
+        
+        result = image.copy()
+        result.putalpha(mask)
+        return result
+    
+    def _add_border_shadow(self, image: Image.Image, opacity: int = 100) -> Image.Image:
+        """Add a subtle shadow effect to make the frame pop."""
+        # Create a slightly larger black background for shadow
+        shadow = Image.new("RGBA", (image.width + 12, image.height + 12), (0, 0, 0, opacity))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(8))
+        
+        # Place the original image on top of shadow
+        result = Image.new("RGBA", shadow.size, (0, 0, 0, 0))
+        result.paste(shadow, (0, 0), shadow)
+        result.paste(image, (6, 6), image)
+        
+        return result
 
 
 class VideoGenerator:
@@ -311,9 +569,23 @@ class VideoGenerator:
         self.media_processor = media_processor
         self.threads = []
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+        
+        # Animation configuration based on level - reduced movement values to keep content in frame
+        if config.animation_level == "low":
+            self.animation_factor = 0.1  # Reduced from 0.3 to 0.1
+            self.use_advanced_transitions = False
+            self.use_vignette = False
+        elif config.animation_level == "medium":
+            self.animation_factor = 0.2  # Reduced from 0.6 to 0.2
+            self.use_advanced_transitions = True
+            self.use_vignette = False  # Disable vignette for medium level
+        else:  # high
+            self.animation_factor = 0.4  # Reduced from 1.0 to 0.4
+            self.use_advanced_transitions = True
+            self.use_vignette = True   # Only use vignette in high animation level
     
     def collect_captions(self, subreddit: str, amount: int = 3, 
-                       post_type: str = "hot", retry: bool = False) -> Tuple[List[Tuple[str, str]], List[List[str]]]:
+                       post_type: str = "hot", retry: bool = False) -> Tuple[List[Tuple[str, str, str]], List[List[str]]]:
         """Collect meme URLs and captions for subreddit."""
         try:
             posts = RedditClient.get_posts(
@@ -334,8 +606,9 @@ class VideoGenerator:
             while True:
                 selected_meme_urls = random.sample(meme_urls, amount)
                 print(f"\nCaptions will be generated for the following URLs in r/{subreddit}:")
-                for url, author in selected_meme_urls:
-                    print(f"    - {url}")
+                for url, author, title in selected_meme_urls:
+                    print(f"    - {title} by u/{author}")
+                    print(f"      {url}")
                 
                 if self.config.auto_mode or input("Proceed with these memes? (y/n): ").lower() == "y":
                     meme_urls = selected_meme_urls
@@ -343,7 +616,7 @@ class VideoGenerator:
             
             # Process captions in parallel using thread pool
             def process_meme(idx_url):
-                idx, (meme_url, author) = idx_url
+                idx, (meme_url, author, title) = idx_url
                 image_reply = self.ai_client.get_image_analysis(GENERATE_CAPTION_PROMPT, meme_url)
                 captions = image_reply["reading_order"]
                 
@@ -392,7 +665,8 @@ class VideoGenerator:
             logger.error(f"Error collecting captions: {e}")
             raise
             
-    def generate_clip(self, image_url: str, idx: int, captions: Optional[List[str]] = None) -> VideoFileClip:
+    def generate_clip(self, image_url: str, idx: int, captions: Optional[List[str]] = None, 
+                    title: str = "", username: str = "") -> VideoFileClip:
         """Generate a video clip from a meme image with captions."""
         logger.info(f"Generating clip {idx} from {image_url}")
         
@@ -410,42 +684,80 @@ class VideoGenerator:
             
         # Generate audio from captions
         audio_path = self.media_processor.generate_audio(". ".join(captions), idx)
-        
-        # Download and process image
-        meme_path = self.media_processor.download_image(image_url, idx)
-        img = Image.open(meme_path)
-        
-        # Calculate resize ratio for fitting in target dimensions
-        img_ratio = min(TARGET_WIDTH * 0.95 / img.width, TARGET_HEIGHT * 0.95 / img.height)
-        new_size = (int(img.width * img_ratio), int(img.height * img_ratio))
-        img = img.resize(new_size, Image.LANCZOS)
-        
-        # Create audio clip
         audio_clip = AudioFileClip(audio_path)
         
-        # Create meme clip with proper centering
-        meme_bg = Image.new("RGBA", (TARGET_WIDTH, TARGET_HEIGHT), (0, 0, 0, 0))
-        paste_x = (TARGET_WIDTH - new_size[0]) // 2
-        paste_y = (TARGET_HEIGHT - new_size[1]) // 2
-        meme_bg.paste(img, (paste_x, paste_y))
+        # Download image
+        meme_path = self.media_processor.download_image(image_url, idx)
         
-        # Create video clip with effects
-        meme_clip = ImageClip(np.array(meme_bg)).with_duration(audio_clip.duration)
+        # Create social media frame with title
+        framed_img = self.media_processor.create_social_media_frame(
+            meme_path, title or f"Meme {idx+1}", username or "redditor"
+        )
+        
+        # Save framed image temporarily
+        framed_path = f"redditmeme2video/images/framed_meme_{idx}.png"
+        framed_img.save(framed_path)
+        
+        # Create base video clip
+        meme_clip = ImageClip(np.array(framed_img)).with_duration(audio_clip.duration)
+        
+        # Apply animations based on animation level - with content-safe constraints
+        if self.animation_factor > 0:
+            # Apply subtle zoom effect with boundaries to prevent content going out of frame
+            max_zoom = 1 + (0.03 * self.animation_factor)  # Reduced max zoom (from 0.05 to 0.03)
+            min_zoom = 1 - (0.01 * self.animation_factor)  # Add slight zoom out
+            
+            # Create a constrained zoom effect
+            def zoom_effect(t):
+                progress = t / audio_clip.duration
+                # Smoother sin wave with smaller amplitude
+                zoom = 1 + (max_zoom - 1) * 0.5 * (np.sin(progress * np.pi * 2) + 1)
+                # Ensure we stay within safe limits
+                zoom = max(min_zoom, min(max_zoom, zoom))
+                return zoom
+            
+            # Reduce movement by applying zoom only to a slightly smaller region
+            safety_margin = 0.95  # Keep 95% of the content to ensure it stays in frame
+            meme_clip = meme_clip.resized(zoom_effect)
         
         # Apply different effects based on position in sequence
         if idx == 0:
-            final_clip = CompositeVideoClip([meme_clip.with_effects([vfx.FadeOut(0.05)])]).with_audio(audio_clip)
+            # First clip: fade in + subtle zoom in - shorter transition times
+            final_clip = CompositeVideoClip(
+                [meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.2)])]
+            ).with_audio(audio_clip)
         else:
-            final_clip = CompositeVideoClip([meme_clip.with_effects([vfx.FadeIn(0.05), vfx.FadeOut(0.05)])]).with_audio(audio_clip)
+            # Middle clips: different transitions based on level - with reduced slide distances
+            if self.use_advanced_transitions and idx % 3 == 0:  # Every third clip
+                # Use gentler slide-in effect
+                final_clip = CompositeVideoClip(
+                    [meme_clip.with_effects([
+                        vfx.FadeIn(0.3),  # Added fade for smoothness
+                        vfx.FadeOut(0.2)
+                    ])]
+                ).with_audio(audio_clip)
+            elif self.use_advanced_transitions and idx % 3 == 1:  # Every third+1 clip
+                # Use gentler slide-in from left
+                final_clip = CompositeVideoClip(
+                    [meme_clip.with_effects([
+                        vfx.FadeIn(0.3),  # Added fade for smoothness
+                        vfx.FadeOut(0.2)
+                    ])]
+                ).with_audio(audio_clip)
+            else:
+                # Default crossfade effect
+                final_clip = CompositeVideoClip(
+                    [meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.3)])]
+                ).with_audio(audio_clip)
             
         return final_clip
 
     def generate_clips_in_parallel(self, meme_urls, pre_captions):
         """Generate clips in parallel using thread pool."""
         futures = []
-        for idx, ((meme_url, _), captions) in enumerate(zip(meme_urls, pre_captions)):
+        for idx, ((meme_url, author, title), captions) in enumerate(zip(meme_urls, pre_captions)):
             futures.append(
-                self.thread_pool.submit(self.generate_clip, meme_url, idx, captions)
+                self.thread_pool.submit(self.generate_clip, meme_url, idx, captions, title, author)
             )
         
         # Wait for all to complete
@@ -464,7 +776,7 @@ class VideoGenerator:
     def generate_video(self, subreddit: str, amount: int = 3, post_type: str = "hot",
                       retry: bool = False, add_comments: bool = False,
                       output_location: Optional[str] = None,
-                      pre_meme_urls: Optional[List[Tuple[str, str]]] = None, 
+                      pre_meme_urls: Optional[List[Tuple[str, str, str]]] = None, 
                       pre_captions: Optional[List[List[str]]] = None) -> Dict[str, Dict[str, str]]:
         """Generate a complete video from Reddit memes."""
         logger.info(f"Generating video for r/{subreddit} with {amount} memes")
@@ -493,14 +805,14 @@ class VideoGenerator:
         else:
             # Generate clips serially if not in auto mode (for better user experience)
             clips = []
-            for idx, ((meme_url, _), captions) in enumerate(zip(pre_meme_urls, pre_captions)):
-                subclip = self.generate_clip(meme_url, idx, captions=captions)
+            for idx, ((meme_url, author, title), captions) in enumerate(zip(pre_meme_urls, pre_captions)):
+                subclip = self.generate_clip(meme_url, idx, captions=captions, title=title, username=author)
                 if idx == len(pre_meme_urls) - 1:
                     subclip = subclip.with_effects([vfx.CrossFadeOut(0.5)])
                 clips.append(subclip)
         
         # Build credits
-        for meme_url, author in pre_meme_urls:
+        for _, author, _ in pre_meme_urls:
             comment += f" u/{author},"
         comment = comment[:-1] + " for the memes!"
         
@@ -557,6 +869,41 @@ class VideoGenerator:
                 transparent_background,
             ]
         )
+        
+        # Apply final video-wide effects if enabled for this animation level
+        if self.use_vignette:
+            # Add much subtler vignette effect
+            def vignette_effect(get_frame, t):
+                frame = get_frame(t)
+                height, width = frame.shape[:2]
+                Y, X = np.ogrid[:height, :width]
+                center_x, center_y = width / 2, height / 2
+                
+                # Calculate distance from center
+                dist_from_center = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
+                # Normalize distance
+                max_dist = np.sqrt(center_x**2 + center_y**2)
+                
+                # Create much subtler vignette (less darkening at edges)
+                vignette = np.clip(1 - dist_from_center / max_dist, 0, 1)
+                # Make vignette much less aggressive (brightened from 0.85 to 0.95)
+                vignette = vignette * 0.15 + 0.85  # 85% minimum brightness (was 15%)
+                
+                if frame.ndim == 3:
+                    # Apply vignette while preserving alpha channel if it exists
+                    if frame.shape[2] == 4:
+                        rgb = frame[:, :, :3] * np.dstack([vignette, vignette, vignette])
+                        alpha = frame[:, :, 3]
+                        frame = np.dstack((rgb, alpha))
+                    else:
+                        frame = frame * np.dstack([vignette, vignette, vignette])
+                else:
+                    frame = frame * vignette
+                    
+                return np.clip(frame, 0, 255).astype('uint8')
+            
+            # Apply very subtle vignette
+            final_video = final_video.transform(vignette_effect, apply_to="mask")
         
         # Write video to file
         output_path = f"{output_location}/final_video.mp4"
@@ -622,7 +969,7 @@ def main():
     config = Config(
         subreddits=["HistoryMemes"],
         min_upvotes=1000,
-        auto_mode=False
+        auto_mode=True
     )
     
     # Initialize components
@@ -642,7 +989,7 @@ def main():
         meme_urls, pre_captions = precomputed[idx]
         video_data = video_generator.generate_video(
             subreddit, 
-            amount=3, 
+            amount=1,
             post_type="top", 
             add_comments=True,
             output_location=f"{config.output_dir}/{idx}",
