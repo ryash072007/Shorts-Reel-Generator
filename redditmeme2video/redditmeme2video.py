@@ -46,7 +46,7 @@ DEFAULT_MIN_UPVOTES = 3000
 DEFAULT_VOICE = "en-AU-WilliamNeural"
 DEFAULT_RATE = "+30%"
 DEFAULT_PITCH = "+20Hz"
-MEMES_PER_VIDEO = 1
+MEMES_PER_VIDEO = 1  # Number of memes per video
 
 # AI prompt templates
 GENERATE_CAPTION_PROMPT = """Analyze the provided image and identify the captions that are part of the meme's intended dialogue or message. You should not have to describe the meme format/image as this is a OCR tool. Only the relevant text on the image has to be processed. Ignore any watermarks, credits, or unrelated text. Do not duplicate any captions. If there is no text, return an empty list of reading_order. Determine the natural reading order as a human would perceive it. Then, output the captions in JSON format with an ordered list, as follows:
@@ -401,13 +401,15 @@ class MediaProcessor:
         
         # Define padding and margins
         side_padding = 40
-        min_frame_width = int(TARGET_WIDTH * 0.7)  # Minimum frame width (70% of screen)
-        max_frame_width = int(TARGET_WIDTH * 0.98)  # Maximum frame width (98% of screen)
+        
+        # Make frame smaller - reduce to 85% of previous minimum/maximum width
+        min_frame_width = int(TARGET_WIDTH * 0.6)  # Reduced from 0.7 to 0.6 (smaller minimum width)
+        max_frame_width = int(TARGET_WIDTH * 0.85)  # Reduced from 0.98 to 0.85 (smaller maximum width)
         
         # Calculate optimal meme size with better screen utilization
         # Start by calculating how large we can make the meme while maintaining aspect ratio
         scale_factor = min(max_frame_width / (meme_img.width + side_padding*2), 
-                          TARGET_HEIGHT * 0.7 / meme_img.height)  # Ensure height isn't too tall
+                          TARGET_HEIGHT * 0.6 / meme_img.height)  # Reduced from 0.7 to 0.6 (smaller height)
         
         # Apply scale factor to get new meme dimensions
         new_meme_width = int(meme_img.width * scale_factor)
@@ -508,11 +510,12 @@ class MediaProcessor:
         
         # Create final image to place the frame on (transparent background for compositing)
         final_image = Image.new("RGBA", (TARGET_WIDTH, TARGET_HEIGHT), (0, 0, 0, 0))
+        
         # Center the frame
         paste_x = (TARGET_WIDTH - frame_width) // 2
         
-        # Position the frame at a better vertical position - slightly higher on screen
-        paste_y = (TARGET_HEIGHT - frame_height) // 2 - 100  # Shifted up by 100px
+        # Position the frame slightly higher on screen - adjust to work well with panning
+        paste_y = (TARGET_HEIGHT - frame_height) // 2 - 150  # Shifted higher (from -100 to -150)
         paste_y = max(50, paste_y)  # Ensure it's not too high
         
         final_image.paste(frame, (paste_x, paste_y), frame)
@@ -588,19 +591,16 @@ class VideoGenerator:
         self.threads = []
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
         
-        # Animation configuration based on level - reduced movement values to keep content in frame
+        # Configuration for transitions and effects (not animations)
         if config.animation_level == "low":
-            self.animation_factor = 0.1  # Reduced from 0.3 to 0.1
             self.use_advanced_transitions = False
             self.use_vignette = False
         elif config.animation_level == "medium":
-            self.animation_factor = 0.2  # Reduced from 0.6 to 0.2
             self.use_advanced_transitions = True
-            self.use_vignette = False  # Disable vignette for medium level
+            self.use_vignette = False
         else:  # high
-            self.animation_factor = 0.4  # Reduced from 1.0 to 0.4
             self.use_advanced_transitions = True
-            self.use_vignette = True   # Only use vignette in high animation level
+            self.use_vignette = True
     
     def collect_captions(self, subreddit: str, amount: int = 3, 
                        post_type: str = "hot", retry: bool = False) -> Tuple[List[Tuple[str, str, str]], List[List[str]]]:
@@ -716,62 +716,23 @@ class VideoGenerator:
         framed_path = f"redditmeme2video/images/framed_meme_{idx}.png"
         framed_img.save(framed_path)
         
-        # Create base video clip
+        # Create base video clip - completely static
         meme_clip = ImageClip(np.array(framed_img)).with_duration(audio_clip.duration)
         
-        # Apply animations based on animation level - with content-safe constraints
-        if self.animation_factor > 0:
-            # Apply enhanced zoom effect that starts centered and then moves more dramatically
-            max_zoom = 1 + (0.05 * self.animation_factor)  # Increased max zoom for more movement
-            min_zoom = 1 - (0.02 * self.animation_factor)  # Increased zoom-out range
-            
-            # Create a more dynamic zoom effect that starts static and then increases
-            def zoom_effect(t):
-                progress = t / audio_clip.duration
-                
-                # Start with no zoom/movement for the first 15% of the clip
-                if progress < 0.15:
-                    return 1.0  # Static/centered at start
-                
-                # After initial static period, increase the amplitude of movement
-                normalized_progress = (progress - 0.15) / 0.85  # Rescale to 0-1 range for the rest of the clip
-                
-                # More dramatic movement using sin function with higher frequency
-                zoom = 1 + (max_zoom - 1) * 0.8 * (np.sin(normalized_progress * np.pi * 3) + 1)
-                
-                # Ensure we stay within safe limits
-                zoom = max(min_zoom, min(max_zoom, zoom))
-                return zoom
-            
-            # Apply the enhanced zoom effect
-            meme_clip = meme_clip.resized(zoom_effect)
-        
-        # Apply different effects based on position in sequence
+        # Apply different effects based on position in sequence - only transitions, no animations
         if idx == 0:
-            # First clip: fade in + subtle zoom in - shorter transition times
-            final_clip = CompositeVideoClip(
-                [meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.2)])]
-            ).with_audio(audio_clip)
+            final_clip = CompositeVideoClip([meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.2)])]).with_audio(audio_clip)
         else:
-            # Middle clips: different transitions based on level - with reduced slide distances
-            if self.use_advanced_transitions and idx % 3 == 0:  # Every third clip
-                # Use gentler slide-in effect
+            # Middle clips: different transitions based on level
+            if self.use_advanced_transitions and idx % 3 == 0:  
                 final_clip = CompositeVideoClip(
-                    [meme_clip.with_effects([
-                        vfx.FadeIn(0.3),  # Added fade for smoothness
-                        vfx.FadeOut(0.2)
-                    ])]
+                    [meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.2)])]
                 ).with_audio(audio_clip)
-            elif self.use_advanced_transitions and idx % 3 == 1:  # Every third+1 clip
-                # Use gentler slide-in from left
+            elif self.use_advanced_transitions and idx % 3 == 1:
                 final_clip = CompositeVideoClip(
-                    [meme_clip.with_effects([
-                        vfx.FadeIn(0.3),  # Added fade for smoothness
-                        vfx.FadeOut(0.2)
-                    ])]
+                    [meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.2)])]
                 ).with_audio(audio_clip)
             else:
-                # Default crossfade effect
                 final_clip = CompositeVideoClip(
                     [meme_clip.with_effects([vfx.FadeIn(0.3), vfx.FadeOut(0.3)])]
                 ).with_audio(audio_clip)
@@ -896,12 +857,11 @@ class VideoGenerator:
         else:
             logger.info("Background music disabled")
         
-        # Composite final video with background and audio
-        final_video = CompositeVideoClip(composite_layers)
+        # Composite final video with background and audio - completely static
+        final_composite = CompositeVideoClip(composite_layers)
         
-        # Apply final video-wide effects if enabled for this animation level
+        # Apply vignette effect if enabled (doesn't create animation, just a visual effect)
         if self.use_vignette:
-            # Add much subtler vignette effect
             def vignette_effect(get_frame, t):
                 frame = get_frame(t)
                 height, width = frame.shape[:2]
@@ -913,13 +873,11 @@ class VideoGenerator:
                 # Normalize distance
                 max_dist = np.sqrt(center_x**2 + center_y**2)
                 
-                # Create much subtler vignette (less darkening at edges)
+                # Create subtle vignette
                 vignette = np.clip(1 - dist_from_center / max_dist, 0, 1)
-                # Make vignette much less aggressive (brightened from 0.85 to 0.95)
-                vignette = vignette * 0.15 + 0.85  # 85% minimum brightness (was 15%)
+                vignette = vignette * 0.15 + 0.85  # 85% minimum brightness
                 
                 if frame.ndim == 3:
-                    # Apply vignette while preserving alpha channel if it exists
                     if frame.shape[2] == 4:
                         rgb = frame[:, :, :3] * np.dstack([vignette, vignette, vignette])
                         alpha = frame[:, :, 3]
@@ -931,8 +889,8 @@ class VideoGenerator:
                     
                 return np.clip(frame, 0, 255).astype('uint8')
             
-            # Apply very subtle vignette
-            final_video = final_video.transform(vignette_effect, apply_to="mask")
+            # Apply vignette
+            final_composite = final_composite.transform(vignette_effect, apply_to="mask")
         
         # Write video to file
         output_path = f"{output_location}/final_video.mp4"
@@ -940,7 +898,7 @@ class VideoGenerator:
         # Use threading for writing the video file
         write_thread = threading.Thread(
             target=self._write_video_to_file,
-            args=(final_video, output_path, output_location),
+            args=(final_composite, output_path, output_location),
             daemon=False
         )
         self.threads.append(write_thread)
@@ -1040,5 +998,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
