@@ -14,13 +14,20 @@ import sys
 import threading
 import time
 import concurrent.futures
+import uuid
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from io import BytesIO
+import hashlib  # Add this import
+# Remove edge_tts import
+# import edge_tts import
+# Add ElevenLabs imports
+from elevenlabs import VoiceSettings
+from elevenlabs.client import ElevenLabs
+from elevenlabs.client import ElevenLabs
 
-import edge_tts
 import numpy as np
 import requests
 from groq import Groq
@@ -30,7 +37,11 @@ from PIL.ImageOps import expand
 
 # Add rfm module to path
 sys.path.append("rfm")
+sys.path.append("redditmeme2video")
 from rfm import get_music_path
+
+# Add import for our new SSML editor
+from ssml_editor import edit_ssml_captions
 
 # Configure logging
 logging.basicConfig(
@@ -49,14 +60,42 @@ DEFAULT_PITCH = "+20Hz"
 MEMES_PER_VIDEO = 1  # Number of memes per video
 
 # AI prompt templates
-GENERATE_CAPTION_PROMPT = """Analyze the provided image and identify the captions that are part of the meme's intended dialogue or message. You should not have to describe the meme format/image as this is a OCR tool. Only the relevant text on the image has to be processed. Ignore any watermarks, credits, or unrelated text. Do not duplicate any captions. If there is no text, return an empty list of reading_order. Determine the natural reading order as a human would perceive it. Then, output the captions in JSON format with an ordered list, as follows:
-        {
+GENERATE_CAPTION_PROMPT = \
+"""
+Task:
+Analyze the given image and extract captions that contribute to the meme’s intended humor, dialogue, or message. Instead of merely reading the text verbatim, interpret the meme’s context to generate captions that enhance its comedic or expressive intent.
+
+Guidelines:
+
+Context-Aware Extraction: Identify and refine the captions to best align with the meme’s meaning. Do not simply transcribe text—ensure the extracted captions are highly relevant to the joke or intended message.
+Ignore Unrelated Elements: Exclude watermarks, credits, or any extraneous text.
+Maintain Natural Flow: Determine the logical reading order as a human would, prioritizing spatial positioning and conversational structure.
+Expressive SSML Output: Format the extracted captions in highly expressive SSML (Speech Synthesis Markup Language) to enhance comedic or emotional impact when read aloud.
+Output Format (JSON with SSML):
+
+json
+Copy
+Edit
+{
   "reading_order": [
-    "First caption",
-    "Second caption",
+    "<speak><prosody rate='fast' pitch='high'>First caption!</prosody></speak>",
+    "<speak><break time='500ms'/> <prosody volume='loud'>Second caption?!</prosody></speak>"
   ]
 }
-Ensure the order reflects logical reading patterns based on spatial positioning and dialogue structure."""
+Possible SSML Tags to Use:
+
+<speak>: Wraps the spoken text.
+<prosody>: Adjusts pitch, rate, and volume.
+<break time='Xms'/>: Inserts a pause of specified duration.
+<emphasis>: Adds emphasis to a word or phrase.
+<voice>: Changes the voice characteristics (if supported).
+<say-as>: Specifies how to say numbers, dates, or other formats.
+<p>: Defines a paragraph, useful for structuring longer text.
+<s>: Defines a sentence for pauses between sentences.
+<phoneme>: Specifies how to pronounce a specific word.
+<sub>: Substitutes a word or phrase for easier understanding.
+Ensure variation in tone, pitch, and speed to match the meme’s mood—whether it’s sarcasm, excitement, or frustration.
+"""
 
 GENERATE_TITLE_PROMPT = """
 Given the following image:
@@ -77,9 +116,14 @@ class Config:
     min_upvotes: int = DEFAULT_MIN_UPVOTES
     auto_mode: bool = False
     upload: bool = False
-    voice: str = DEFAULT_VOICE
-    rate: str = DEFAULT_RATE
-    pitch: str = DEFAULT_PITCH
+    # Replace edge-tts voice settings with ElevenLabs settings
+    elevenlabs_voice_id: str = "I4MFG1v2Ntx1WlZeBovR"  # Default to Adam voice
+    elevenlabs_model: str = "eleven_flash_v2_5"        # Default to turbo model
+    elevenlabs_stability: float = 0.35
+    elevenlabs_similarity_boost: float = 0.55
+    elevenlabs_style: float = 0.0
+    elevenlabs_speaker_boost: bool = True
+    elevenlabs_speed: float = 1.00
     output_dir: str = "redditmeme2video/output"
     dark_mode: bool = True  # Default to dark mode for modern appeal
     animation_level: str = "high"  # Options: "low", "medium", "high"
@@ -93,9 +137,14 @@ class Config:
             min_upvotes=int(os.environ.get("MIN_UPVOTES", DEFAULT_MIN_UPVOTES)),
             auto_mode=os.environ.get("AUTO_MODE", "0") == "1",
             upload=os.environ.get("UPLOAD", "0") == "1",
-            voice=os.environ.get("TTS_VOICE", DEFAULT_VOICE),
-            rate=os.environ.get("TTS_RATE", DEFAULT_RATE),
-            pitch=os.environ.get("TTS_PITCH", DEFAULT_PITCH),
+            # ElevenLabs settings from environment
+            elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "I4MFG1v2Ntx1WlZeBovR"),
+            elevenlabs_model=os.environ.get("ELEVENLABS_MODEL", "eleven_flash_v2_5"),
+            elevenlabs_stability=float(os.environ.get("ELEVENLABS_STABILITY", "0.35")),
+            elevenlabs_similarity_boost=float(os.environ.get("ELEVENLABS_SIMILARITY_BOOST", "0.55")),
+            elevenlabs_style=float(os.environ.get("ELEVENLABS_STYLE", "0.0")),
+            elevenlabs_speaker_boost=os.environ.get("ELEVENLABS_SPEAKER_BOOST", "1") == "1",
+            elevenlabs_speed=float(os.environ.get("ELEVENLABS_SPEED", "1.15")),
             output_dir=os.environ.get("OUTPUT_DIR", "redditmeme2video/output"),
             dark_mode=os.environ.get("DARK_MODE", "1") == "1",
             animation_level=os.environ.get("ANIMATION_LEVEL", "high"),
@@ -149,7 +198,7 @@ class AIClient:
             raise
     
     def get_image_analysis(self, prompt: str, image_url: str, 
-                         model: str = "llama-3.2-11b-vision-preview") -> Dict[str, Any]:
+                         model: str = "llama-3.2-90b-vision-preview") -> Dict[str, Any]:
         """Analyze image using AI vision model with caching. The 11b model works better than the 11b version."""
         # Check cache
         cache_key = f"{model}:{prompt}:{image_url}"
@@ -251,6 +300,12 @@ class MediaProcessor:
         self.image_dir.mkdir(exist_ok=True, parents=True)
         self.audio_dir.mkdir(exist_ok=True, parents=True)
         self.assets_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Initialize ElevenLabs client
+        self.elevenlabs_api_key = os.environ.get("ELEVENLABS_API_KEY")
+        if not self.elevenlabs_api_key:
+            logger.warning("ELEVENLABS_API_KEY not set. TTS functionality may not work correctly.")
+        self.elevenlabs_client = ElevenLabs(api_key=self.elevenlabs_api_key)
         
         # Theme colors
         self.theme = self._get_theme_colors(config.dark_mode)
@@ -356,8 +411,17 @@ class MediaProcessor:
         return None
     
     def generate_audio(self, text: str, idx: int) -> str:
-        """Generate audio from text using edge_tts."""
-        output_file = self.audio_dir / f"audio_{idx}.mp3"
+        """Generate audio from text using ElevenLabs TTS with content-based caching."""
+        # Generate a content hash for the text
+        content_hash = hashlib.md5(text.encode()).hexdigest()
+        
+        # Check for any existing file with this hash
+        for existing_file in self.audio_dir.glob(f"*_{content_hash}.mp3"):
+            logger.info(f"Using cached audio for content hash {content_hash[:8]}")
+            return str(existing_file)
+        
+        # If not found by content, use the regular indexed file
+        output_file = self.audio_dir / f"audio_{idx}_{content_hash}.mp3"
         
         # If file exists, skip generation
         if output_file.exists():
@@ -366,12 +430,34 @@ class MediaProcessor:
             
         logger.info(f"Generating audio for text: {text[:30]}...")
         with self._audio_lock:  # Thread safety for audio generation
-            tts = edge_tts.Communicate(
-                text, self.config.voice,
-                rate=self.config.rate,
-                pitch=self.config.pitch
-            )
-            tts.save_sync(str(output_file))
+            try:
+                # Using ElevenLabs for TTS
+                response = self.elevenlabs_client.text_to_speech.convert(
+                    voice_id=self.config.elevenlabs_voice_id,
+                    output_format="mp3_22050_32",
+                    text=text,
+                    model_id=self.config.elevenlabs_model,
+                    voice_settings=VoiceSettings(
+                        stability=self.config.elevenlabs_stability,
+                        similarity_boost=self.config.elevenlabs_similarity_boost,
+                        style=self.config.elevenlabs_style,
+                        use_speaker_boost=self.config.elevenlabs_speaker_boost,
+                        speed=self.config.elevenlabs_speed,
+                    ),
+                )
+                
+                # Write the audio to the file
+                with open(output_file, "wb") as f:
+                    for chunk in response:
+                        if chunk:
+                            f.write(chunk)
+                
+                logger.info(f"Audio file generated: {output_file}")
+                
+            except Exception as e:
+                logger.error(f"Error generating audio with ElevenLabs: {e}")
+                # Return empty file path or implement fallback if needed
+                return ""
         
         return str(output_file)
     
@@ -618,28 +704,6 @@ class VideoGenerator:
                 idx, (meme_url, author, title) = idx_url
                 image_reply = self.ai_client.get_image_analysis(GENERATE_CAPTION_PROMPT, meme_url)
                 captions = image_reply["reading_order"]
-                
-                # Allow user to check captions if not in auto mode
-                if not self.config.auto_mode:
-                    print(f"\nImage URL: {meme_url}")
-                    print("Received captions:")
-                    for i, caption in enumerate(captions):
-                        print(f"    {i}: {caption}")
-                        
-                    while True:
-                        entry = input("For this image, enter index to remove or 'e' to edit (press Enter if ok): ")
-                        if entry == "":
-                            break
-                        elif entry == "e":
-                            _index = int(input("Enter the index to edit: "))
-                            _caption = input("Enter the new caption: ")
-                            captions[_index] = _caption
-                        else:
-                            try:
-                                captions.pop(int(entry))
-                            except (IndexError, ValueError):
-                                print("Invalid index to remove")
-                
                 return idx, captions
             
             # Use ThreadPoolExecutor for parallel processing
@@ -653,17 +717,46 @@ class VideoGenerator:
                 captions_list = [captions for _, captions in results]
             else:
                 # Process serially if user interaction is needed
-                captions_list = []
+                results = []
                 for idx, meme_data in enumerate(meme_urls):
+                    print(f"\nAnalyzing meme {idx+1}/{len(meme_urls)}...")
                     _, captions = process_meme((idx, meme_data))
-                    captions_list.append(captions)
+                    results.append((idx, captions))
+                
+                # Use GUI editor for caption editing instead of CLI
+                print("\nOpening SSML Caption Editor...")
+                
+                # Flatten list of captions for the editor
+                all_captions = []
+                for _, captions in results:
+                    all_captions.extend(captions)
+                
+                # Show GUI for editing
+                try:
+                    edited_captions = edit_ssml_captions(
+                        all_captions, 
+                        elevenlabs_client=self.media_processor.elevenlabs_client,
+                        voice_id=self.config.elevenlabs_voice_id
+                    )
+                    
+                    # Redistribute edited captions back to their original groups
+                    captions_list = []
+                    caption_index = 0
+                    for _, captions in results:
+                        group_size = len(captions)
+                        captions_list.append(edited_captions[caption_index:caption_index + group_size])
+                        caption_index += group_size
+                except Exception as e:
+                    logger.error(f"Error in SSML Editor: {e}")
+                    # Fallback to original captions if editor fails
+                    captions_list = [captions for _, captions in results]
                 
             return meme_urls, captions_list
             
         except Exception as e:
             logger.error(f"Error collecting captions: {e}")
             raise
-            
+    
     def generate_clip(self, image_url: str, idx: int, captions: Optional[List[str]] = None, 
                     title: str = "", username: str = "") -> VideoFileClip:
         """Generate a video clip from a meme image with captions."""
@@ -893,7 +986,7 @@ def main():
     config = Config(
         subreddits=["HistoryMemes"],
         min_upvotes=1000,
-        auto_mode=True,
+        auto_mode=False,
         use_background_music=False  # Enable background music by default
     )
     
