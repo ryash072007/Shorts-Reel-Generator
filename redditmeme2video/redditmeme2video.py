@@ -46,6 +46,7 @@ DEFAULT_MIN_UPVOTES = 3000
 DEFAULT_VOICE = "en-AU-WilliamNeural"
 DEFAULT_RATE = "+30%"
 DEFAULT_PITCH = "+20Hz"
+MEMES_PER_VIDEO = 1
 
 # AI prompt templates
 GENERATE_CAPTION_PROMPT = """Analyze the provided image and identify the captions that are part of the meme's intended dialogue or message. You should not have to describe the meme format/image as this is a OCR tool. Only the relevant text on the image has to be processed. Ignore any watermarks, credits, or unrelated text. Do not duplicate any captions. If there is no text, return an empty list of reading_order. Determine the natural reading order as a human would perceive it. Then, output the captions in JSON format with an ordered list, as follows:
@@ -82,6 +83,7 @@ class Config:
     output_dir: str = "redditmeme2video/output"
     dark_mode: bool = True  # Default to dark mode for modern appeal
     animation_level: str = "high"  # Options: "low", "medium", "high"
+    use_background_music: bool = True  # Option to enable/disable background music
     
     @classmethod
     def from_env(cls) -> "Config":
@@ -97,6 +99,7 @@ class Config:
             output_dir=os.environ.get("OUTPUT_DIR", "redditmeme2video/output"),
             dark_mode=os.environ.get("DARK_MODE", "1") == "1",
             animation_level=os.environ.get("ANIMATION_LEVEL", "high"),
+            use_background_music=os.environ.get("USE_BACKGROUND_MUSIC", "1") == "1",
         )
 
 
@@ -438,21 +441,22 @@ class MediaProcessor:
         profile_x = 20
         frame.paste(profile_pic, (profile_x, 20), profile_pic)
         
-        # Add username - moved to the right to avoid overlap
-        username_x = profile_x + 65  # Increased from 90 to create more space
-        draw.text((username_x, 35), f"u/{username}", fill=self.theme["text_secondary"], font=self.username_font)
+        # Add username - moved higher up to avoid title overlap
+        username_x = profile_x + 65
+        username_y = 15  # Moved up from 35 to 15
+        draw.text((username_x, username_y), f"u/{username}", fill=self.theme["text_secondary"], font=self.username_font)
         
-        # Add title text - keep it short with ellipsis if too long
-        title_short = title if len(title) < 60 else title[:57] + "..."  # Allow longer titles
+        # Add title text but with more vertical spacing from username
+        title_short = title if len(title) < 60 else title[:57] + "..."
         
-        # Create multi-line title for better readability - with increased left margin
-        title_x = username_x  # Align with username to avoid profile pic
-        title_width = frame_width - title_x - 20  # Leave right margin
+        # Create multi-line title for better readability - with increased left margin and vertical spacing
+        title_x = username_x
+        title_y_offset = 30  # Reduced from 45 to 30 to bring title closer to username
+        title_width = frame_width - title_x - 20
         title_lines = []
         line = ""
         for word in title_short.split():
             test_line = line + " " + word if line else word
-            # Estimate text width - varies by font
             if len(test_line) * (self.title_font.size * 0.6) < title_width:
                 line = test_line
             else:
@@ -461,8 +465,8 @@ class MediaProcessor:
         if line:
             title_lines.append(line)
         
-        # Draw multi-line title - adjusted position
-        title_y = header_height - 15 - (len(title_lines) * self.title_font.size)
+        # Draw multi-line title - with increased spacing from username
+        title_y = username_y + title_y_offset
         for i, line in enumerate(title_lines):
             draw.text((title_x, title_y + i * self.title_font.size * 1.2), 
                      line, fill=self.theme["text_primary"], font=self.title_font)
@@ -717,21 +721,29 @@ class VideoGenerator:
         
         # Apply animations based on animation level - with content-safe constraints
         if self.animation_factor > 0:
-            # Apply subtle zoom effect with boundaries to prevent content going out of frame
-            max_zoom = 1 + (0.03 * self.animation_factor)  # Reduced max zoom (from 0.05 to 0.03)
-            min_zoom = 1 - (0.01 * self.animation_factor)  # Add slight zoom out
+            # Apply enhanced zoom effect that starts centered and then moves more dramatically
+            max_zoom = 1 + (0.05 * self.animation_factor)  # Increased max zoom for more movement
+            min_zoom = 1 - (0.02 * self.animation_factor)  # Increased zoom-out range
             
-            # Create a constrained zoom effect
+            # Create a more dynamic zoom effect that starts static and then increases
             def zoom_effect(t):
                 progress = t / audio_clip.duration
-                # Smoother sin wave with smaller amplitude
-                zoom = 1 + (max_zoom - 1) * 0.5 * (np.sin(progress * np.pi * 2) + 1)
+                
+                # Start with no zoom/movement for the first 15% of the clip
+                if progress < 0.15:
+                    return 1.0  # Static/centered at start
+                
+                # After initial static period, increase the amplitude of movement
+                normalized_progress = (progress - 0.15) / 0.85  # Rescale to 0-1 range for the rest of the clip
+                
+                # More dramatic movement using sin function with higher frequency
+                zoom = 1 + (max_zoom - 1) * 0.8 * (np.sin(normalized_progress * np.pi * 3) + 1)
+                
                 # Ensure we stay within safe limits
                 zoom = max(min_zoom, min(max_zoom, zoom))
                 return zoom
             
-            # Reduce movement by applying zoom only to a slightly smaller region
-            safety_margin = 0.95  # Keep 95% of the content to ensure it stays in frame
+            # Apply the enhanced zoom effect
             meme_clip = meme_clip.resized(zoom_effect)
         
         # Apply different effects based on position in sequence
@@ -860,29 +872,32 @@ class VideoGenerator:
             y_center=TARGET_HEIGHT // 2,
         )
         
-        # Get background music
-        bg_audio_path = get_music_path()
-        bg_audio_clip = (
-            AudioFileClip(bg_audio_path)
-            .subclipped(0, final_video.duration)
-            .with_volume_scaled(0.05)
-        )
+        # Prepare components for final composition
+        composite_layers = [bg_clip.with_effects([vfx.MultiplyColor(1)]), final_video]
         
-        # Create transparent layer for audio
-        transparent_background = (
-            ColorClip((TARGET_WIDTH, TARGET_HEIGHT), color=(0, 0, 0, 0))
-            .with_duration(final_video.duration)
-            .with_audio(bg_audio_clip)
-        )
+        # Add background music conditionally
+        if self.config.use_background_music:
+            # Get background music
+            bg_audio_path = get_music_path()
+            bg_audio_clip = (
+                AudioFileClip(bg_audio_path)
+                .subclipped(0, final_video.duration)
+                .with_volume_scaled(0.05)
+            )
+            
+            # Create transparent layer for audio
+            transparent_background = (
+                ColorClip((TARGET_WIDTH, TARGET_HEIGHT), color=(0, 0, 0, 0))
+                .with_duration(final_video.duration)
+                .with_audio(bg_audio_clip)
+            )
+            composite_layers.append(transparent_background)
+            logger.info(f"Added background music from {bg_audio_path}")
+        else:
+            logger.info("Background music disabled")
         
         # Composite final video with background and audio
-        final_video = CompositeVideoClip(
-            [
-                bg_clip.with_effects([vfx.MultiplyColor(1)]),
-                final_video,
-                transparent_background,
-            ]
-        )
+        final_video = CompositeVideoClip(composite_layers)
         
         # Apply final video-wide effects if enabled for this animation level
         if self.use_vignette:
@@ -979,11 +994,12 @@ class VideoGenerator:
 
 def main():
     """Main entry point."""
-    # Load configuration
+    # Load configuration with more options
     config = Config(
         subreddits=["HistoryMemes"],
         min_upvotes=1000,
-        auto_mode=True
+        auto_mode=True,
+        use_background_music=False  # Enable background music by default
     )
     
     # Initialize components
@@ -995,7 +1011,7 @@ def main():
     precomputed = {}
     for idx, subreddit in enumerate(config.subreddits):
         logger.info(f"--- Caption collection for r/{subreddit} ---")
-        meme_urls, pre_captions = video_generator.collect_captions(subreddit, amount=3, post_type="top")
+        meme_urls, pre_captions = video_generator.collect_captions(subreddit, amount=MEMES_PER_VIDEO, post_type="top")
         precomputed[idx] = (meme_urls, pre_captions)
         
     # Generate videos with precomputed captions
@@ -1003,7 +1019,7 @@ def main():
         meme_urls, pre_captions = precomputed[idx]
         video_data = video_generator.generate_video(
             subreddit, 
-            amount=1,
+            amount=MEMES_PER_VIDEO,
             post_type="top", 
             add_comments=True,
             output_location=f"{config.output_dir}/{idx}",
