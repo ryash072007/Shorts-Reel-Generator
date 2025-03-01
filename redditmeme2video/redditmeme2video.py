@@ -112,13 +112,13 @@ class Config:
     auto_mode: bool = False
     upload: bool = False
     # Replace edge-tts voice settings with ElevenLabs settings
-    elevenlabs_voice_id: str = "I4MFG1v2Ntx1WlZeBovR"  # Default to Adam voice
+    elevenlabs_voice_id: str = "UgBBYS2sOqTuMpoF3BR0"# Mark # reddit voice "I4MFG1v2Ntx1WlZeBovR"  # Default to Adam voice
     elevenlabs_model: str = "eleven_flash_v2_5"        # Default to turbo model
-    elevenlabs_stability: float = 0.35
-    elevenlabs_similarity_boost: float = 0.55
-    elevenlabs_style: float = 0.0
+    elevenlabs_stability: float = 0.34
+    elevenlabs_similarity_boost: float = 0.75
+    elevenlabs_style: float = 0.34
     elevenlabs_speaker_boost: bool = True
-    elevenlabs_speed: float = 1.00
+    elevenlabs_speed: float = 1.05
     output_dir: str = "redditmeme2video/output"
     dark_mode: bool = True  # Default to dark mode for modern appeal
     animation_level: str = "high"  # Options: "low", "medium", "high"
@@ -193,7 +193,7 @@ class AIClient:
             raise
     
     def get_image_analysis(self, prompt: str, image_url: str, 
-                         model: str = "llama-3.2-90b-vision-preview") -> Dict[str, Any]:
+                         model: str = "llama-3.2-90b-vision-preview", is_retrying = False) -> Dict[str, Any]:
         """Analyze image using AI vision model with caching. The 11b model works better than the 11b version."""
         # Check cache
         cache_key = f"{model}:{prompt}:{image_url}"
@@ -235,7 +235,12 @@ class AIClient:
                 logger.info(f"Waiting for {wait_time} seconds...")
                 time.sleep(wait_time)
                 return self.get_image_analysis(prompt, image_url, model)
-            raise
+            
+            if not is_retrying:
+                logger.info("Retrying again!")
+                return self.get_image_analysis(prompt, image_url, model, True)
+            else:
+                raise
 
 
 class RedditClient:
@@ -983,7 +988,7 @@ def main():
     """Main entry point."""
     # Load configuration with more options
     config = Config(
-        subreddits=["HistoryMemes"],
+        subreddits=["DankMemes"],
         min_upvotes=1500,
         auto_mode=False,
         use_background_music=True  # Enable background music by default
