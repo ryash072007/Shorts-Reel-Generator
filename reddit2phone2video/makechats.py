@@ -158,7 +158,7 @@ def main():
             print(f"{msg.get('sender')}: {msg.get('text')}")
             
         # Save to file
-        output_file = "chat_conversation.json"
+        output_file = "reddit2phone2video/chat_conversation.json"
         with open(output_file, "w") as f:
             json.dump(chat_data, f, indent=2)
         print(f"\nSaved conversation to {output_file}")
