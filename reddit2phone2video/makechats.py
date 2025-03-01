@@ -162,6 +162,8 @@ def main():
         with open(output_file, "w") as f:
             json.dump(chat_data, f, indent=2)
         print(f"\nSaved conversation to {output_file}")
+
+        return chat_data
         
     except Exception as e:
         logger.error(f"Error: {str(e)}")
