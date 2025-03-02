@@ -988,8 +988,8 @@ def main():
     """Main entry point."""
     # Load configuration with more options
     config = Config(
-        subreddits=["DankMemes"],
-        min_upvotes=1500,
+        subreddits=["Memes"],
+        min_upvotes=4000,
         auto_mode=False,
         use_background_music=True  # Enable background music by default
     )
