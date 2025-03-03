@@ -11,15 +11,16 @@ from tkinter import ttk, messagebox, scrolledtext
 import threading
 import pygame  # Replace playsound with pygame
 from typing import List, Callable, Optional
-from elevenlabs import VoiceSettings
-from elevenlabs.client import ElevenLabs
+import edge_tts  # Add edge_tts for audio preview
+import asyncio  # Add asyncio for edge_tts
 import tempfile
 import os
 import time
 from pathlib import Path
 import hashlib  # Add this import at the top
-# Remove playsound import
-# from playsound import playsound
+# Remove ElevenLabs imports
+# from elevenlabs import VoiceSettings
+# from elevenlabs.client import ElevenLabs
 
 
 class SSMLTag:
@@ -97,8 +98,7 @@ class SSMLParser:
 class SSMLEditorGUI:
     """GUI for editing SSML captions."""
     
-    def __init__(self, master, captions: List[str], elevenlabs_client=None, 
-                voice_id="I4MFG1v2Ntx1WlZeBovR"):
+    def __init__(self, master, captions: List[str], voice_id="en-AU-WilliamNeural"):
         """Initialize the editor window."""
         self.master = master
         self.master.title("SSML Caption Editor")
@@ -107,7 +107,6 @@ class SSMLEditorGUI:
         self.current_index = 0
         self.audio_file = None
         self.play_thread = None
-        self.elevenlabs_client = elevenlabs_client
         self.voice_id = voice_id
         self.temp_dir = Path(tempfile.mkdtemp())
         
@@ -117,6 +116,13 @@ class SSMLEditorGUI:
         
         # Initialize pygame mixer for audio playback
         pygame.mixer.init()
+        
+        # Initialize event loop for edge_tts
+        try:
+            self.loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
         
         # Create GUI elements
         self._create_widgets()
@@ -332,15 +338,6 @@ class SSMLEditorGUI:
     
     def _play_preview(self):
         """Play TTS preview of the current caption."""
-        if not self.elevenlabs_client:
-            messagebox.showinfo("Preview Unavailable", 
-                              "ElevenLabs client not initialized. TTS preview is unavailable.")
-            return
-        
-        if self.play_thread and self.play_thread.is_alive():
-            messagebox.showinfo("Already Playing", "Audio preview is already playing.")
-            return
-        
         # Disable preview button while generating
         self.preview_btn.config(state=tk.DISABLED)
         self.preview_btn.config(text="Generating...")
@@ -355,8 +352,11 @@ class SSMLEditorGUI:
         try:
             ssml = self.ssml_text.get("1.0", tk.END).strip()
             
+            # Extract plain text from SSML since edge_tts doesn't support SSML
+            plain_text = SSMLParser.extract_content(ssml)
+            
             # Generate content hash for caching
-            content_hash = hashlib.md5(ssml.encode()).hexdigest()
+            content_hash = hashlib.md5(plain_text.encode()).hexdigest()
             
             # Check if we already have this audio cached
             if content_hash in self.previewed_captions:
@@ -377,26 +377,16 @@ class SSMLEditorGUI:
             # Create unique filename using content hash
             audio_path = self.temp_dir / f"preview_{content_hash}.mp3"
             
-            # Generate audio
-            response = self.elevenlabs_client.text_to_speech.convert(
-                voice_id=self.voice_id,
-                output_format="mp3_22050_32",
-                text=ssml,
-                model_id="eleven_flash_v2_5",
-                voice_settings=VoiceSettings(
-                    stability=0.35,
-                    similarity_boost=0.55,
-                    style=0.0,
-                    use_speaker_boost=True,
-                    speed=1.15,
-                ),
-            )
+            # Use edge_tts to generate audio
+            communicate = edge_tts.Communicate(plain_text, self.voice_id)
             
-            # Write audio to temp file
-            with open(audio_path, "wb") as f:
-                for chunk in response:
-                    if chunk:
-                        f.write(chunk)
+            # Run the async operation in our event loop
+            async def process_audio():
+                # Save audio to file
+                await communicate.save(str(audio_path))
+            
+            # Execute the async function
+            self.loop.run_until_complete(process_audio())
             
             # Cache this audio
             self.previewed_captions[content_hash] = audio_path
@@ -441,20 +431,20 @@ class SSMLEditorGUI:
         return self.edited_captions
 
 
-def edit_ssml_captions(captions: List[str], elevenlabs_client=None, voice_id=None) -> List[str]:
+def edit_ssml_captions(captions: List[str], elevenlabs_client=None, voice_id="en-AU-WilliamNeural") -> List[str]:
     """
     Open GUI editor for SSML captions.
     
     Args:
         captions: List of SSML caption strings to edit
-        elevenlabs_client: Optional ElevenLabs client for audio preview
-        voice_id: Voice ID to use for previews
+        elevenlabs_client: Ignored, kept for backward compatibility
+        voice_id: Voice ID to use for previews (for edge_tts)
         
     Returns:
         List of edited SSML caption strings
     """
     root = tk.Tk()
-    editor = SSMLEditorGUI(root, captions, elevenlabs_client, voice_id)
+    editor = SSMLEditorGUI(root, captions, voice_id)
     root.mainloop()
     return editor.get_edited_captions()
 

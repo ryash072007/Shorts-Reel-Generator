@@ -21,12 +21,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from io import BytesIO
 import hashlib  # Add this import
-# Remove edge_tts import
-# import edge_tts import
-# Add ElevenLabs imports
-from elevenlabs import VoiceSettings
-from elevenlabs.client import ElevenLabs
-from elevenlabs.client import ElevenLabs
+import edge_tts  # Re-add edge_tts import
+import asyncio  # Add asyncio for edge_tts
+import re  # Add re for SSML stripping
+# Remove ElevenLabs imports
+# from elevenlabs import VoiceSettings
+# from elevenlabs.client import ElevenLabs
 
 import numpy as np
 import requests
@@ -41,7 +41,7 @@ sys.path.append("redditmeme2video")
 from rfm import get_music_path
 
 # Add import for our new SSML editor
-from ssml_editor import edit_ssml_captions
+from ssml_editor import edit_ssml_captions, SSMLParser
 
 # Configure logging
 logging.basicConfig(
@@ -104,6 +104,17 @@ Return the result in JSON format:
 }
 """
 
+# Add a helper function to strip SSML tags
+def strip_ssml_tags(ssml_text: str) -> str:
+    """Strip SSML tags from text for use with edge_tts."""
+    # First use the SSMLParser method if available
+    try:
+        plain_text = SSMLParser.extract_content(ssml_text)
+        return plain_text
+    except:
+        # Fallback to regex if the parser fails
+        return re.sub(r'<[^>]+>', '', ssml_text)
+
 @dataclass
 class Config:
     """Configuration settings for the video generator."""
@@ -111,14 +122,11 @@ class Config:
     min_upvotes: int = DEFAULT_MIN_UPVOTES
     auto_mode: bool = False
     upload: bool = False
-    # Replace edge-tts voice settings with ElevenLabs settings
-    elevenlabs_voice_id: str = "UgBBYS2sOqTuMpoF3BR0"# Mark # reddit voice "I4MFG1v2Ntx1WlZeBovR"  # Default to Adam voice
-    elevenlabs_model: str = "eleven_flash_v2_5"        # Default to turbo model
-    elevenlabs_stability: float = 0.34
-    elevenlabs_similarity_boost: float = 0.75
-    elevenlabs_style: float = 0.34
-    elevenlabs_speaker_boost: bool = True
-    elevenlabs_speed: float = 1.05
+    # Replace ElevenLabs settings with edge_tts settings
+    edge_tts_voice: str = "en-AU-WilliamNeural"  # Default voice
+    edge_tts_rate: str = "+15%"  # Speak rate adjustment
+    edge_tts_volume: str = "+0%"  # Volume adjustment
+    edge_tts_pitch: str = "+0%"  # Pitch adjustment
     output_dir: str = "redditmeme2video/output"
     dark_mode: bool = True  # Default to dark mode for modern appeal
     animation_level: str = "high"  # Options: "low", "medium", "high"
@@ -132,14 +140,11 @@ class Config:
             min_upvotes=int(os.environ.get("MIN_UPVOTES", DEFAULT_MIN_UPVOTES)),
             auto_mode=os.environ.get("AUTO_MODE", "0") == "1",
             upload=os.environ.get("UPLOAD", "0") == "1",
-            # ElevenLabs settings from environment
-            elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "I4MFG1v2Ntx1WlZeBovR"),
-            elevenlabs_model=os.environ.get("ELEVENLABS_MODEL", "eleven_flash_v2_5"),
-            elevenlabs_stability=float(os.environ.get("ELEVENLABS_STABILITY", "0.35")),
-            elevenlabs_similarity_boost=float(os.environ.get("ELEVENLABS_SIMILARITY_BOOST", "0.55")),
-            elevenlabs_style=float(os.environ.get("ELEVENLABS_STYLE", "0.0")),
-            elevenlabs_speaker_boost=os.environ.get("ELEVENLABS_SPEAKER_BOOST", "1") == "1",
-            elevenlabs_speed=float(os.environ.get("ELEVENLABS_SPEED", "1.15")),
+            # edge_tts settings from environment
+            edge_tts_voice=os.environ.get("EDGE_TTS_VOICE", "en-AU-WilliamNeural"),
+            edge_tts_rate=os.environ.get("EDGE_TTS_RATE", "+15%"),
+            edge_tts_volume=os.environ.get("EDGE_TTS_VOLUME", "+0%"),
+            edge_tts_pitch=os.environ.get("EDGE_TTS_PITCH", "+0%"),
             output_dir=os.environ.get("OUTPUT_DIR", "redditmeme2video/output"),
             dark_mode=os.environ.get("DARK_MODE", "1") == "1",
             animation_level=os.environ.get("ANIMATION_LEVEL", "high"),
@@ -301,11 +306,12 @@ class MediaProcessor:
         self.audio_dir.mkdir(exist_ok=True, parents=True)
         self.assets_dir.mkdir(exist_ok=True, parents=True)
         
-        # Initialize ElevenLabs client
-        self.elevenlabs_api_key = os.environ.get("ELEVENLABS_API_KEY")
-        if not self.elevenlabs_api_key:
-            logger.warning("ELEVENLABS_API_KEY not set. TTS functionality may not work correctly.")
-        self.elevenlabs_client = ElevenLabs(api_key=self.elevenlabs_api_key)
+        # Initialize event loop for edge_tts
+        try:
+            self.loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
         
         # Theme colors
         self.theme = self._get_theme_colors(config.dark_mode)
@@ -411,9 +417,12 @@ class MediaProcessor:
         return None
     
     def generate_audio(self, text: str, idx: int) -> str:
-        """Generate audio from text using ElevenLabs TTS with content-based caching."""
+        """Generate audio from text using edge_tts with content-based caching."""
+        # Strip SSML tags since edge_tts doesn't support them
+        plain_text = strip_ssml_tags(text)
+        
         # Generate a content hash for the text
-        content_hash = hashlib.md5(text.encode()).hexdigest()
+        content_hash = hashlib.md5(plain_text.encode()).hexdigest()
         
         # Check for any existing file with this hash
         for existing_file in self.audio_dir.glob(f"*_{content_hash}.mp3"):
@@ -428,34 +437,25 @@ class MediaProcessor:
             logger.info(f"Using cached audio for {idx}")
             return str(output_file)
             
-        logger.info(f"Generating audio for text: {text[:30]}...")
+        logger.info(f"Generating audio for text: {plain_text[:30]}...")
         with self._audio_lock:  # Thread safety for audio generation
             try:
-                # Using ElevenLabs for TTS
-                response = self.elevenlabs_client.text_to_speech.convert(
-                    voice_id=self.config.elevenlabs_voice_id,
-                    output_format="mp3_22050_32",
-                    text=text,
-                    model_id=self.config.elevenlabs_model,
-                    voice_settings=VoiceSettings(
-                        stability=self.config.elevenlabs_stability,
-                        similarity_boost=self.config.elevenlabs_similarity_boost,
-                        style=self.config.elevenlabs_style,
-                        use_speaker_boost=self.config.elevenlabs_speaker_boost,
-                        speed=self.config.elevenlabs_speed,
-                    ),
+                # Using edge_tts for TTS
+                communicate = edge_tts.Communicate(
+                    plain_text,
+                    self.config.edge_tts_voice,
+                    rate=self.config.edge_tts_rate,
+                    volume=self.config.edge_tts_volume,
+                    pitch=self.config.edge_tts_pitch
                 )
                 
-                # Write the audio to the file
-                with open(output_file, "wb") as f:
-                    for chunk in response:
-                        if chunk:
-                            f.write(chunk)
+                # Run asyncio in a thread-safe way
+                self.loop.run_until_complete(communicate.save(str(output_file)))
                 
                 logger.info(f"Audio file generated: {output_file}")
                 
             except Exception as e:
-                logger.error(f"Error generating audio with ElevenLabs: {e}")
+                logger.error(f"Error generating audio with edge_tts: {e}")
                 # Return empty file path or implement fallback if needed
                 return ""
         
@@ -471,12 +471,12 @@ class MediaProcessor:
                         try:
                             file_path.unlink()
                         except PermissionError:
-                            logger.warning(f"Could not delete {file_path}, file in use")
+                            logger.warning(f"Could not delete {file_path, file in use}")
                     for file_path in Path(folder).glob('*.png'):
                         try:
                             file_path.unlink()
                         except PermissionError:
-                            logger.warning(f"Could not delete {file_path}, file in use")
+                            logger.warning(f"Could not delete {file_path, file in use}")
         except Exception as e:
             logger.error(f"Error cleaning temporary files: {e}")
         
@@ -737,8 +737,7 @@ class VideoGenerator:
                 try:
                     edited_captions = edit_ssml_captions(
                         all_captions, 
-                        elevenlabs_client=self.media_processor.elevenlabs_client,
-                        voice_id=self.config.elevenlabs_voice_id
+                        voice_id=self.config.edge_tts_voice
                     )
                     
                     # Redistribute edited captions back to their original groups
