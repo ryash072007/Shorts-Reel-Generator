@@ -98,7 +98,8 @@ class SSMLParser:
 class SSMLEditorGUI:
     """GUI for editing SSML captions."""
     
-    def __init__(self, master, captions: List[str], voice_id="en-AU-WilliamNeural"):
+    def __init__(self, master, captions: List[str], voice_id="en-AU-WilliamNeural", 
+                 rate=None, volume=None, pitch=None):
         """Initialize the editor window."""
         self.master = master
         self.master.title("SSML Caption Editor")
@@ -109,6 +110,11 @@ class SSMLEditorGUI:
         self.play_thread = None
         self.voice_id = voice_id
         self.temp_dir = Path(tempfile.mkdtemp())
+        
+        # Store Edge TTS parameters
+        self.rate = rate
+        self.volume = volume
+        self.pitch = pitch
         
         # Add tracking for previewed and edited captions
         self.previewed_captions = {}  # hash -> audio_path
@@ -377,8 +383,17 @@ class SSMLEditorGUI:
             # Create unique filename using content hash
             audio_path = self.temp_dir / f"preview_{content_hash}.mp3"
             
-            # Use edge_tts to generate audio
-            communicate = edge_tts.Communicate(plain_text, self.voice_id)
+            # Use edge_tts to generate audio with the configured parameters
+            # Only include parameters that have actual values
+            kwargs = {"voice": self.voice_id}
+            if self.rate:
+                kwargs["rate"] = self.rate
+            if self.volume:
+                kwargs["volume"] = self.volume
+            if self.pitch:
+                kwargs["pitch"] = self.pitch
+            
+            communicate = edge_tts.Communicate(plain_text, **kwargs)
             
             # Run the async operation in our event loop
             async def process_audio():
@@ -431,7 +446,8 @@ class SSMLEditorGUI:
         return self.edited_captions
 
 
-def edit_ssml_captions(captions: List[str], elevenlabs_client=None, voice_id="en-AU-WilliamNeural") -> List[str]:
+def edit_ssml_captions(captions: List[str], elevenlabs_client=None, voice_id="en-AU-WilliamNeural",
+                      rate=None, volume=None, pitch=None) -> List[str]:
     """
     Open GUI editor for SSML captions.
     
@@ -439,12 +455,15 @@ def edit_ssml_captions(captions: List[str], elevenlabs_client=None, voice_id="en
         captions: List of SSML caption strings to edit
         elevenlabs_client: Ignored, kept for backward compatibility
         voice_id: Voice ID to use for previews (for edge_tts)
+        rate: Edge TTS speech rate parameter
+        volume: Edge TTS volume parameter
+        pitch: Edge TTS pitch parameter
         
     Returns:
         List of edited SSML caption strings
     """
     root = tk.Tk()
-    editor = SSMLEditorGUI(root, captions, voice_id)
+    editor = SSMLEditorGUI(root, captions, voice_id, rate, volume, pitch)
     root.mainloop()
     return editor.get_edited_captions()
 

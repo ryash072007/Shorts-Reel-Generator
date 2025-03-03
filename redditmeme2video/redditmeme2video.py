@@ -52,7 +52,7 @@ logger = logging.getLogger("redditmeme2video")
 
 # Constants
 TARGET_WIDTH, TARGET_HEIGHT = 1080, 1920
-FPS = 30
+FPS = 60
 DEFAULT_MIN_UPVOTES = 3000  # Minimum upvotes for memes
 MEMES_PER_VIDEO = 3  # Number of memes per video
 
@@ -125,8 +125,8 @@ class Config:
     # Replace ElevenLabs settings with edge_tts settings
     edge_tts_voice: str = "en-AU-WilliamNeural"  # Default voice
     edge_tts_rate: str = "+15%"  # Speak rate adjustment
-    edge_tts_volume: str = "+0%"  # Volume adjustment
-    edge_tts_pitch: str = "+0%"  # Pitch adjustment
+    edge_tts_volume: str = "+5%"  # Volume adjustment
+    edge_tts_pitch: str = "+30Hz"  # Pitch adjustment
     output_dir: str = "redditmeme2video/output"
     dark_mode: bool = True  # Default to dark mode for modern appeal
     animation_level: str = "high"  # Options: "low", "medium", "high"
@@ -223,7 +223,7 @@ class AIClient:
                 ],
                 model=model,
                 response_format={"type": "json_object"},
-                temperature=0.3,
+                temperature=0.15,
             )
             logger.info("Received response from Groq API")
             result = json.loads(image_completion.choices[0].message.content)
@@ -471,12 +471,12 @@ class MediaProcessor:
                         try:
                             file_path.unlink()
                         except PermissionError:
-                            logger.warning(f"Could not delete {file_path, file in use}")
+                            logger.warning(f"Could not delete {file_path}, file in use")
                     for file_path in Path(folder).glob('*.png'):
                         try:
                             file_path.unlink()
                         except PermissionError:
-                            logger.warning(f"Could not delete {file_path, file in use}")
+                            logger.warning(f"Could not delete {file_path}, file in use")
         except Exception as e:
             logger.error(f"Error cleaning temporary files: {e}")
         
@@ -686,18 +686,163 @@ class VideoGenerator:
                     raise ValueError(f"Could not find enough memes for {subreddit}")
                 logger.info("Retrying with weekly posts")
                 return self.collect_captions(subreddit, amount, "top", True)
+            
+            # Initialize saved memes (memes we want to keep)
+            saved_memes = []
+            saved_positions = []  # Keep track of positions where saved memes are placed
                 
             # Let user select memes for this video if not in auto mode
             while True:
-                selected_meme_urls = random.sample(meme_urls, amount)
-                print(f"\nCaptions will be generated for the following URLs in r/{subreddit}:")
-                for url, author, title in selected_meme_urls:
-                    print(f"    - {title} by u/{author}")
-                    print(f"      {url}")
+                # Create a new selection of memes
+                # If we have saved memes, include them at their original positions
+                # and fill the rest with random memes
+                if saved_memes:
+                    # Start with a fresh random selection excluding saved memes
+                    remaining_slots = amount - len(saved_memes)
+                    available_memes = [m for m in meme_urls if m not in saved_memes]
+                    
+                    if remaining_slots > 0:
+                        # Get random memes for remaining slots
+                        random_selection = random.sample(available_memes, min(remaining_slots, len(available_memes)))
+                    else:
+                        random_selection = []
+                    
+                    # Create the new combined selection with saved memes at their positions
+                    selected_meme_urls = [None] * amount  # Initialize with None placeholders
+                    
+                    # Place saved memes at their saved positions
+                    for saved_meme, position in zip(saved_memes, saved_positions):
+                        selected_meme_urls[position] = saved_meme
+                    
+                    # Fill remaining None spots with random memes
+                    random_idx = 0
+                    for i in range(amount):
+                        if selected_meme_urls[i] is None and random_idx < len(random_selection):
+                            selected_meme_urls[i] = random_selection[random_idx]
+                            random_idx += 1
+                else:
+                    # First round, just pick random memes
+                    selected_meme_urls = random.sample(meme_urls, amount)
                 
-                if self.config.auto_mode or input("Proceed with these memes? (y/n): ").lower() == "y":
+                print(f"\nCaptions will be generated for the following URLs in r/{subreddit}:")
+                for idx, (url, author, title) in enumerate(selected_meme_urls):
+                    # Mark saved memes with an asterisk
+                    saved_marker = "*" if (url, author, title) in saved_memes else " "
+                    print(f"   {saved_marker}{idx+1}. {title} by u/{author}")
+                    print(f"       {url}")
+                
+                # Enhanced user prompt
+                print("\nOptions:")
+                print("  y - Proceed with these memes")
+                print("  n - Re-shuffle all non-saved memes")
+                print("  s x,y,... - Save memes at positions x,y,... for future selections (1-based)")
+                print("  r - Reset saved memes")
+                print("  o - Reorder memes")
+                
+                user_input = input("Enter your choice: ").lower()
+                
+                # Process user input
+                if user_input == "y":
                     meme_urls = selected_meme_urls
+                    
+                    # Add reordering functionality if not in auto mode
+                    if not self.config.auto_mode and input("Would you like to reorder these memes? (y/n): ").lower() == "y":
+                        print("\nCurrent meme order:")
+                        for idx, (_, author, title) in enumerate(meme_urls):
+                            print(f"    {idx+1}. {title} by u/{author}")
+                        
+                        # Get new order from user
+                        while True:
+                            try:
+                                new_order_input = input(f"\nEnter new order as comma-separated numbers (e.g., '3,1,2' for {amount} items): ")
+                                new_order = [int(x.strip()) - 1 for x in new_order_input.split(",")]
+                                
+                                # Validate input
+                                if len(new_order) != amount:
+                                    print(f"Error: Please specify exactly {amount} positions")
+                                    continue
+                                    
+                                if sorted(new_order) != list(range(amount)):
+                                    print(f"Error: Please use each number from 1 to {amount} exactly once")
+                                    continue
+                                
+                                # Reorder meme URLs
+                                meme_urls = [meme_urls[i] for i in new_order]
+                                print("\nMemes reordered successfully!")
+                                break
+                                
+                            except (ValueError, IndexError) as e:
+                                print(f"Error in input: {e}. Please try again.")
+                    
                     break
+                elif user_input == "n":
+                    # Continue loop to reshuffle non-saved memes
+                    continue
+                elif user_input.startswith("s "):
+                    try:
+                        # Parse indices (1-based)
+                        indices = [int(i.strip()) - 1 for i in user_input[2:].split(',') if i.strip()]
+                        
+                        # Validate indices
+                        if any(i < 0 or i >= amount for i in indices):
+                            print(f"Error: Indices must be between 1 and {amount}")
+                            continue
+                            
+                        # Clear previous saved memes and positions
+                        saved_memes = []
+                        saved_positions = []
+                        
+                        # Save selected memes and their positions
+                        for i in indices:
+                            saved_memes.append(selected_meme_urls[i])
+                            saved_positions.append(i)
+                            
+                        print(f"Saved {len(saved_memes)} memes for future selections")
+                    except ValueError as e:
+                        print(f"Error parsing indices: {e}")
+                elif user_input == "r":
+                    # Reset saved memes
+                    saved_memes = []
+                    saved_positions = []
+                    print("Reset all saved memes")
+                elif user_input == "o":
+                    print("\nCurrent meme order:")
+                    for idx, (_, author, title) in enumerate(selected_meme_urls):
+                        print(f"    {idx+1}. {title} by u/{author}")
+                    
+                    # Get new order from user
+                    try:
+                        new_order_input = input(f"\nEnter new order as comma-separated numbers (e.g., '3,1,2' for {amount} items): ")
+                        new_order = [int(x.strip()) - 1 for x in new_order_input.split(",")]
+                        
+                        # Validate input
+                        if len(new_order) != amount:
+                            print(f"Error: Please specify exactly {amount} positions")
+                            continue
+                            
+                        if sorted(new_order) != list(range(amount)):
+                            print(f"Error: Please use each number from 1 to {amount} exactly once")
+                            continue
+                        
+                        # Reorder meme URLs and update saved positions
+                        selected_meme_urls = [selected_meme_urls[i] for i in new_order]
+                        
+                        # Update saved positions if any
+                        if saved_memes:
+                            new_saved_positions = []
+                            new_saved_memes = []
+                            for i, meme in enumerate(selected_meme_urls):
+                                if meme in saved_memes:
+                                    new_saved_memes.append(meme)
+                                    new_saved_positions.append(i)
+                            saved_memes = new_saved_memes
+                            saved_positions = new_saved_positions
+                            
+                        print("\nMemes reordered successfully!")
+                    except (ValueError, IndexError) as e:
+                        print(f"Error in input: {e}. Please try again.")
+                else:
+                    print("Invalid input. Please try again.")
             
             # Process captions in parallel using thread pool
             def process_meme(idx_url):
@@ -708,6 +853,9 @@ class VideoGenerator:
                 captions = image_reply["reading_order"]
                 return idx, captions
             
+            # Rest of the method remains the same
+            # ...existing code with caption processing...
+
             # Use ThreadPoolExecutor for parallel processing
             if self.config.auto_mode:  # Only parallelize in auto mode
                 futures = []
@@ -737,7 +885,11 @@ class VideoGenerator:
                 try:
                     edited_captions = edit_ssml_captions(
                         all_captions, 
-                        voice_id=self.config.edge_tts_voice
+                        voice_id=self.config.edge_tts_voice,
+                        # Pass Edge TTS configuration settings for audio preview
+                        rate=self.config.edge_tts_rate,
+                        volume=self.config.edge_tts_volume,
+                        pitch=self.config.edge_tts_pitch
                     )
                     
                     # Redistribute edited captions back to their original groups
@@ -987,7 +1139,7 @@ def main():
     """Main entry point."""
     # Load configuration with more options
     config = Config(
-        subreddits=["Memes"],
+        subreddits=["dankmemes"],
         min_upvotes=4000,
         auto_mode=False,
         use_background_music=True  # Enable background music by default
