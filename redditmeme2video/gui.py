@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import time
+import random
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
@@ -20,19 +21,25 @@ import requests
 import asyncio
 from io import BytesIO
 import edge_tts
+import concurrent.futures
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import from redditmeme2video module
+# Import from redditmeme2video module - keep only what we need
 from redditmeme2video import (
-    AIClient, 
+    AIClient,
     Config, 
     MediaProcessor, 
-    RedditClient, 
-    VideoGenerator,
+    RedditClient,
     strip_ssml_tags
 )
+
+# Import VideoGenerator but rename it to avoid conflicts with our GUI-specific version
+from redditmeme2video import VideoGenerator as CoreVideoGenerator
+
+# Import SSML editor
+from ssml_editor import edit_ssml_captions
 
 # Default configuration values
 DEFAULT_CONFIG = {
@@ -69,6 +76,143 @@ POPULAR_SUBREDDITS = [
     "HolUp", "starterpacks", "technicallythetruth", "ShitPostCrusaders",
     "marvelmemes", "PrequelMemes", "lotrmemes"
 ]
+
+# GUI-optimized video generator that avoids CLI interactions
+class GUIVideoGenerator:
+    """GUI-specific video generator that prevents CLI interactions"""
+    
+    def __init__(self, config: Config, ai_client: AIClient, media_processor: MediaProcessor):
+        """Initialize the GUI-optimized video generator"""
+        self.config = config
+        self.ai_client = ai_client
+        self.media_processor = media_processor
+        
+        # Create the core video generator but we'll override its interactive methods
+        self.core_generator = CoreVideoGenerator(config, ai_client, media_processor)
+        
+        # Thread pool for parallel operations
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+        self.threads = []
+    
+    def collect_captions(self, subreddit: str, amount: int = 3, 
+                      post_type: str = "hot", auto_mode: bool = None) -> Tuple[List[Tuple[str, str, str]], List[List[str]]]:
+        """
+        GUI-optimized version of caption collection that avoids CLI prompts
+        """
+        # Force auto mode to ensure no CLI prompts
+        is_auto_mode = self.config.auto_mode if auto_mode is None else auto_mode
+        
+        try:
+            # Get posts
+            posts = RedditClient.get_posts(
+                subreddit=subreddit, 
+                post_type=post_type, 
+                time_frame="week"  # Default to week for more selection
+            )
+            meme_urls = RedditClient.filter_meme_urls(posts, self.config.min_upvotes)
+            
+            if len(meme_urls) < amount:
+                # Try with top posts of the week for more options
+                posts = RedditClient.get_posts(
+                    subreddit=subreddit, 
+                    post_type="top", 
+                    time_frame="week"
+                )
+                meme_urls = RedditClient.filter_meme_urls(posts, self.config.min_upvotes)
+                
+                if len(meme_urls) < amount:
+                    # Last resort: lower minimum upvotes
+                    reduced_upvotes = max(500, self.config.min_upvotes // 2)
+                    meme_urls = RedditClient.filter_meme_urls(posts, reduced_upvotes)
+                    
+                    if len(meme_urls) < amount:
+                        raise ValueError(f"Not enough memes found for r/{subreddit} even with reduced criteria")
+            
+            # Take a random sample
+            selected_meme_urls = random.sample(meme_urls, min(amount, len(meme_urls)))
+            
+            # Process memes in parallel for faster analysis
+            def process_meme(idx_url):
+                idx, (meme_url, author, title) = idx_url
+                from redditmeme2video import GENERATE_CAPTION_PROMPT
+                formatted_prompt = GENERATE_CAPTION_PROMPT.format(post_title=title)
+                image_reply = self.ai_client.get_image_analysis(formatted_prompt, meme_url)
+                captions = image_reply["reading_order"]
+                return idx, captions
+                
+            # Process captions in parallel if in auto mode
+            if is_auto_mode:
+                # Use thread pool for parallel processing
+                futures = []
+                for idx, meme_data in enumerate(selected_meme_urls):
+                    futures.append(self.thread_pool.submit(process_meme, (idx, meme_data)))
+                    
+                results = [future.result() for future in concurrent.futures.as_completed(futures)]
+                results.sort(key=lambda x: x[0])  # Sort by original index
+                captions_list = [captions for _, captions in results]
+            else:
+                # Process serially for better user experience and to allow editing
+                results = []
+                for idx, meme_data in enumerate(selected_meme_urls):
+                    _, captions = process_meme((idx, meme_data))
+                    results.append((idx, captions))
+                
+                # Here would be a good place to add GUI-based caption editing
+                # For now, we'll just take the raw captions
+                captions_list = [captions for _, captions in results]
+                
+                # Note: In a fully-integrated GUI, we would call the SSML editor here
+                # This would be triggered by the GUI when appropriate
+                
+            return selected_meme_urls, captions_list
+            
+        except Exception as e:
+            raise RuntimeError(f"Error collecting captions: {str(e)}") from e
+            
+    def generate_video(self, subreddit: str, amount: int = 3, 
+                     post_type: str = "hot", output_location: str = None,
+                     pre_meme_urls: Optional[List[Tuple[str, str, str]]] = None,
+                     pre_captions: Optional[List[List[str]]] = None) -> Dict[str, Dict[str, str]]:
+        """
+        GUI-optimized video generation that avoids CLI interactions
+        """
+        # Generate a unique output location if not provided
+        if output_location is None:
+            thread_id = threading.get_ident()
+            output_location = f"{self.config.output_dir}/{subreddit}_{thread_id}"
+            
+        os.makedirs(output_location, exist_ok=True)
+        
+        # Get memes and captions if not provided
+        if pre_meme_urls is None or pre_captions is None:
+            # Force auto mode to ensure no CLI prompts
+            pre_meme_urls, pre_captions = self.collect_captions(
+                subreddit, amount, post_type, auto_mode=True
+            )
+            
+        # Use the core generator's implementation but with our data
+        metadata = self.core_generator.generate_video(
+            subreddit=subreddit,
+            amount=amount,
+            post_type=post_type,
+            add_comments=True,
+            output_location=output_location,
+            pre_meme_urls=pre_meme_urls,
+            pre_captions=pre_captions
+        )
+        
+        return metadata
+        
+    def wait_for_completion(self):
+        """Wait for all video generation threads to complete."""
+        # Forward to the core generator
+        self.core_generator.wait_for_completion()
+        
+        # Also shut down our own thread pool
+        self.thread_pool.shutdown()
+
+# The rest of your GUI code remains the same
+# ...existing code...
 
 class ScrollableFrame(ttk.Frame):
     """A scrollable frame widget"""
@@ -1054,23 +1198,27 @@ class QueuePanel(ttk.Frame):
         thread.start()
         
     def _generate_video_thread(self, item):
-        """Worker thread for video generation"""
+        """Worker thread for video generation - modified to use GUI-optimized generator"""
         try:
             # Initialize needed components
             config = Config(**item.config)
             ai_client = AIClient()
             media_processor = MediaProcessor(config)
-            video_generator = VideoGenerator(config, ai_client, media_processor)
+            
+            # Use our GUI-optimized video generator instead of the core one
+            video_generator = GUIVideoGenerator(config, ai_client, media_processor)
             
             # Update progress periodically
             self.start_progress_updates(item)
             
-            # Generate video
+            # Generate video - this won't produce CLI prompts
             metadata = video_generator.generate_video(
                 subreddit=item.subreddit,
                 amount=item.memes_count,
                 post_type=item.post_type,
-                output_location=item.output_dir
+                output_location=item.output_dir,
+                pre_meme_urls=item.meme_urls,  # May be None
+                pre_captions=item.captions    # May be None
             )
             
             # Wait for all processing to complete 
@@ -1185,8 +1333,8 @@ class MainApplication(tk.Tk):
         # File menu
         file_menu = tk.Menu(menu_bar, tearoff=0)
         file_menu.add_command(label="New Video", command=self.clear_state)
-        file_menu.add_command(label="Save Configuration", command=self.config_panel.save_config)
-        file_menu.add_command(label="Load Configuration", command=self.config_panel.load_config)
+        file_menu.add_command(label="Save Configuration", command = (self.config_panel.save_config))
+        file_menu.add_command(label="Load Configuration", command = (self.config_panel.load_config))
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.quit)
         menu_bar.add_cascade(label="File", menu=file_menu)
@@ -1296,13 +1444,13 @@ class MainApplication(tk.Tk):
                         daemon=True).start()
     
     def _analyze_thread(self, subreddit, amount, post_type, min_upvotes):
-        """Run meme analysis in a background thread"""
+        """Run meme analysis in a background thread - modified to use GUI-optimized generator"""
         try:
             # Initialize components
             config = Config(
                 subreddits=[subreddit],
                 min_upvotes=min_upvotes,
-                auto_mode=True,  # Use auto mode for preview
+                auto_mode=True,  # Force auto mode for preview
                 edge_tts_voice=self.config_panel.voice_var.get(),
                 edge_tts_rate=self.config_panel.rate_var.get(),
                 edge_tts_volume=self.config_panel.volume_var.get(),
@@ -1311,10 +1459,50 @@ class MainApplication(tk.Tk):
             
             ai_client = AIClient()
             media_processor = MediaProcessor(config)
-            video_generator = VideoGenerator(config, ai_client, media_processor)
             
-            # Fetch and analyze memes
-            meme_urls, captions = video_generator.collect_captions(subreddit, amount, post_type)
+            # Use our GUI-optimized generator
+            video_generator = GUIVideoGenerator(config, ai_client, media_processor)
+            
+            # Fetch and analyze memes - this won't produce CLI prompts
+            meme_urls, captions = video_generator.collect_captions(
+                subreddit, amount, post_type, auto_mode=True
+            )
+            
+            # Open the SSML editor for caption editing
+            if not config.auto_mode:
+                # Flatten captions for editor
+                flat_captions = []
+                for caption_group in captions:
+                    flat_captions.extend(caption_group)
+                    
+                try:
+                    # Launch SSML editor in the main thread
+                    def edit_captions_main_thread():
+                        nonlocal flat_captions
+                        flat_captions = edit_ssml_captions(
+                            flat_captions,
+                            voice_id=config.edge_tts_voice,
+                            rate=config.edge_tts_rate,
+                            volume=config.edge_tts_volume,
+                            pitch=config.edge_tts_pitch
+                        )
+                        
+                    # Run in main thread and wait for completion
+                    self.after(0, edit_captions_main_thread)
+                    
+                    # Redistribute edited captions
+                    idx = 0
+                    edited_captions = []
+                    for caption_group in captions:
+                        group_size = len(caption_group)
+                        edited_captions.append(flat_captions[idx:idx+group_size])
+                        idx += group_size
+                        
+                    captions = edited_captions
+                    
+                except Exception as e:
+                    # Just use original captions if editor fails
+                    print(f"Error in SSML editor: {e}")
             
             # Store analysis results 
             self.analyzed_memes = meme_urls
