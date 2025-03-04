@@ -22,6 +22,7 @@ import asyncio
 from io import BytesIO
 import edge_tts
 import concurrent.futures
+from functools import lru_cache
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -89,6 +90,31 @@ POPULAR_SUBREDDITS = [
     "PrequelMemes",
     "lotrmemes",
 ]
+
+# Global thread pool for image loading to avoid creating excess threads
+IMAGE_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+# Create a cache for downloaded images to avoid redownloading
+# This uses the URL as key and stores the PIL Image
+@lru_cache(maxsize=100)
+def get_image_from_url(url):
+    """Download an image from URL and cache it"""
+    response = requests.get(url, timeout=10)
+    if response.status_code == 200:
+        # Check file size before processing to avoid memory issues
+        content_length = len(response.content)
+        if content_length > 10_000_000:  # 10MB limit
+            raise ValueError(f"Image too large ({content_length / 1_000_000:.1f}MB)")
+        
+        img = Image.open(BytesIO(response.content))
+        
+        # Validate image dimensions to avoid memory issues
+        if img.width * img.height > 25_000_000:  # ~25 megapixels limit
+            raise ValueError(f"Image dimensions too large: {img.width}x{img.height}")
+            
+        return img
+    else:
+        raise ValueError(f"Failed to download image: Status {response.status_code}")
 
 
 # GUI-optimized video generator that avoids CLI interactions
@@ -441,12 +467,12 @@ class MemePreviewPanel(ttk.Frame):
         placeholder_text = "No meme selected for preview"
         self.canvas.create_text(200, 150, text=placeholder_text, fill="gray")
 
-        # Caption preview area - MODIFIED to make captions editable
+        # Caption preview area - MODIFIED to make captions editable with increased height
         self.caption_frame = ttk.LabelFrame(self, text="Caption Editor - Edit Text Below")
         self.caption_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.caption_text = scrolledtext.ScrolledText(
-            self.caption_frame, height=5, wrap=tk.WORD
+            self.caption_frame, height=8, wrap=tk.WORD  # Increased height from 5 to 8
         )
         self.caption_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.caption_text.insert(tk.END, "No captions to display")
@@ -540,9 +566,41 @@ class MemePreviewPanel(ttk.Frame):
             self.caption_text.insert("1.0", "--- EDIT CAPTIONS HERE (Save when done) ---\n\n")
             self.edit_hint_added = True
         
-        # Download and display the image
-        threading.Thread(target=self._load_image, daemon=True).start()
+        # Download and display the image using the global thread pool
+        IMAGE_THREAD_POOL.submit(self._load_image)
     
+    def _load_image(self):
+        """Load image in a background thread using the cached image function"""
+        try:
+            if not self.current_meme_url:
+                return
+                
+            # Use the cached image loader
+            image = get_image_from_url(self.current_meme_url)
+
+            # Calculate dimensions to fit in canvas while maintaining aspect ratio
+            canvas_width = self.canvas.winfo_width() or 400
+            canvas_height = self.canvas.winfo_height() or 300
+
+            # Initial scale to fit either width or height
+            scale = min(canvas_width / image.width, canvas_height / image.height) * 0.9
+            new_width = int(image.width * scale)
+            new_height = int(image.height * scale)
+
+            # Resize image
+            image = image.resize((new_width, new_height), Image.LANCZOS)
+
+            # Convert to PhotoImage for display
+            photo_image = ImageTk.PhotoImage(image)
+
+            # Update UI in main thread
+            self.after(
+                0, lambda: self._update_image(photo_image, new_width, new_height)
+            )
+        except Exception as e:
+            # Update UI in main thread to show error
+            self.after(0, lambda: self._show_image_error(str(e)))
+
     def save_caption(self):
         """Save edited caption text back to the data model"""
         if not self.current_caption:
@@ -631,39 +689,6 @@ class MemePreviewPanel(ttk.Frame):
             messagebox.showinfo("Success", "SSML captions updated successfully")
         except Exception as e:
             messagebox.showerror("SSML Editor Error", f"Error editing captions: {str(e)}")
-
-    def _load_image(self):
-        """Load image in a background thread"""
-        try:
-            response = requests.get(self.current_meme_url)
-            if response.status_code == 200:
-                # Load the image from response data
-                image = Image.open(BytesIO(response.content))
-
-                # Calculate dimensions to fit in canvas while maintaining aspect ratio
-                canvas_width = self.canvas.winfo_width() or 400
-                canvas_height = self.canvas.winfo_height() or 300
-
-                # Initial scale to fit either width or height
-                scale = (
-                    min(canvas_width / image.width, canvas_height / image.height) * 0.9
-                )
-                new_width = int(image.width * scale)
-                new_height = int(image.height * scale)
-
-                # Resize image
-                image = image.resize((new_width, new_height), Image.LANCZOS)
-
-                # Convert to PhotoImage for display
-                photo_image = ImageTk.PhotoImage(image)
-
-                # Update UI in main thread
-                self.after(
-                    0, lambda: self._update_image(photo_image, new_width, new_height)
-                )
-        except Exception as e:
-            # Update UI in main thread to show error
-            self.after(0, lambda: self._show_image_error(str(e)))
 
     def _update_image(self, photo_image, width, height):
         """Update the canvas with the loaded image (called from main thread)"""
@@ -1817,7 +1842,8 @@ class MemeSelectionDialog(tk.Toplevel):
 
             ttk.Label(caption_frame, text="Caption:").pack(side=tk.TOP, anchor=tk.W)
 
-            self.caption_editor = scrolledtext.ScrolledText(caption_frame, height=4)
+            # Increased height from 4 to 6
+            self.caption_editor = scrolledtext.ScrolledText(caption_frame, height=6)
             self.caption_editor.pack(side=tk.TOP, fill=tk.X, expand=True)
 
             # Edit and update buttons
@@ -1961,10 +1987,8 @@ class MemeSelectionDialog(tk.Toplevel):
         if 0 <= idx < len(self.meme_urls):
             meme_url, _, _ = self.meme_urls[idx]
 
-            # Start loading the image
-            threading.Thread(
-                target=self.load_preview_image, args=(meme_url,), daemon=True
-            ).start()
+            # Start loading the image using the global thread pool
+            IMAGE_THREAD_POOL.submit(self.load_preview_image, meme_url)
 
             # Update caption editor if it exists and captions are available
             if (
@@ -1983,34 +2007,30 @@ class MemeSelectionDialog(tk.Toplevel):
             self.current_preview_index = idx
 
     def load_preview_image(self, url):
-        """Load and display the preview image"""
+        """Load and display the preview image using the cached function"""
         try:
-            # Download image
-            response = requests.get(url)
+            # Use cached image function
+            image = get_image_from_url(url)
 
-            if response.status_code == 200:
-                # Convert to image
-                image = Image.open(BytesIO(response.content))
+            # Calculate resize dimensions
+            canvas_width = self.preview_canvas.winfo_width() or 300
+            canvas_height = self.preview_canvas.winfo_height() or 200
 
-                # Calculate resize dimensions
-                canvas_width = self.preview_canvas.winfo_width() or 300
-                canvas_height = self.preview_canvas.winfo_height() or 200
+            # Resize image to fit preview
+            scale = (
+                min(canvas_width / image.width, canvas_height / image.height) * 0.9
+            )
+            new_width = int(image.width * scale)
+            new_height = int(image.height * scale)
+            resized_image = image.resize((new_width, new_height), Image.LANCZOS)
 
-                # Resize image to fit preview
-                scale = (
-                    min(canvas_width / image.width, canvas_height / image.height) * 0.9
-                )
-                new_width = int(image.width * scale)
-                new_height = int(image.height * scale)
-                resized_image = image.resize((new_width, new_height), Image.LANCZOS)
+            # Convert to PhotoImage
+            photo = ImageTk.PhotoImage(resized_image)
 
-                # Convert to PhotoImage
-                photo = ImageTk.PhotoImage(resized_image)
-
-                # Update UI in main thread
-                self.after(
-                    0, lambda: self.update_preview_image(photo, new_width, new_height)
-                )
+            # Update UI in main thread
+            self.after(
+                0, lambda: self.update_preview_image(photo, new_width, new_height)
+            )
 
         except Exception as e:
             # Show error message
