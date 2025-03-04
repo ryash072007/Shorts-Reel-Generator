@@ -1,78 +1,95 @@
 # Shorts Reel Generator
 
-A powerful tool for automatically generating short-form vertical videos from Reddit memes.
+A tool for creating short-form videos from Reddit memes with AI-generated captions and TTS narration.
 
 ## Features
 
-- **User-friendly GUI**: Configure all settings through an intuitive graphical interface
-- **AI-powered**: Uses AI to analyze memes and generate natural-sounding captions
-- **Text-to-Speech**: High-quality voice narration with customizable settings
-- **Multi-subreddit Support**: Generate videos from any public subreddit
-- **Queue System**: Set up multiple videos for batch processing
-- **Preview System**: Preview memes and captions before generating videos
-- **SSML Editor**: Edit speech markup for perfect voiceovers
-- **Background Music**: Automatically adds background music to videos
+- Browse and select popular memes from Reddit
+- Automatically generate captions with AI image analysis
+- Edit captions with SSML support for precise voice control
+- Generate videos with synchronized captions and narration
+- Add background music
+- Queue multiple video generation jobs
 
-## Requirements
+## Setup
+
+### Prerequisites
 
 - Python 3.8+
-- Groq API key for AI services
+- [FFmpeg](https://ffmpeg.org/download.html) installed and in your PATH
 
-## Installation
+### Installation
 
-1. Clone this repository:
-```bash
-git clone https://github.com/YourUsername/Shorts-Reel-Generator.git
-cd Shorts-Reel-Generator
-```
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/Shorts-Reel-Generator.git
+   cd Shorts-Reel-Generator
+   ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+2. Install required packages:
+   ```
+   pip install -r requirements.txt
+   ```
 
-3. Set up environment variables:
-```bash
-# On Windows
-set GROQ_API_KEY=your_api_key_here
-
-# On Linux/Mac
-export GROQ_API_KEY=your_api_key_here
-```
+3. Set up your API key:
+   ```
+   # On Windows
+   set GROQ_API_KEY=your_api_key_here
+   
+   # On Linux/Mac
+   export GROQ_API_KEY=your_api_key_here
+   ```
 
 ## Usage
 
-### GUI Mode
+### Starting the GUI
 
 Run the GUI application:
 
-```bash
-python run_gui.py
+```
+python -m redditmeme2video.gui
 ```
 
-The interface allows you to:
-- Select subreddits for video generation
-- Configure TTS voice settings
-- Preview memes and captions
-- Queue multiple videos for generation
-- Customize video appearance and behavior
+### Workflow
 
-### Command-Line Mode
+1. **Configure Settings**
+   - Select subreddits to pull memes from
+   - Adjust voice settings
+   - Set minimum upvotes threshold
+   - Choose output location
 
-For advanced users, you can also use the command-line interface:
+2. **Analyze Memes**
+   - Click "Analyze Memes" to fetch and select memes
+   - Choose which memes to include in your video
 
-```bash
-python -m redditmeme2video.redditmeme2video
-```
+3. **Edit Captions**
+   - Edit the automatically generated captions
+   - Use SSML tags for voice control
+   - Preview how the voice will sound
 
-## Configuration
+4. **Generate Video**
+   - Click "Generate Video" to create your short-form video
+   - Monitor progress in the queue panel
+   - View logs for detailed generation information
 
-Most settings can be configured through the GUI, but you can also:
+5. **Review Results**
+   - When complete, open the video directly from the queue
+   - Copy generated title, description, and tags for uploading
 
-- Save and load configuration presets
-- Customize output quality and style
-- Modify voice and animation settings
-- Set subreddit filters
+## SSML Caption Editing
+
+The application includes a full-featured SSML editor for controlling voice characteristics:
+
+- Add pauses with `<break time="500ms"/>`
+- Emphasize words with `<emphasis level="strong">text</emphasis>`
+- Control speaking rate with `<prosody rate="slow">text</prosody>`
+- Adjust pitch with `<prosody pitch="high">text</prosody>`
+
+## Troubleshooting
+
+- **Missing Voice or TTS Issues**: Make sure to have an internet connection for Edge TTS
+- **Generation Errors**: Check the logs for detailed error information
+- **API Key Issues**: Verify your GROQ API key is correctly set as an environment variable
 
 ## Contributing
 

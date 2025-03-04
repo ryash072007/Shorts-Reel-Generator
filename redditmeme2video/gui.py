@@ -417,7 +417,7 @@ class MemePreviewPanel(ttk.Frame):
         self.prev_btn = ttk.Button(
             nav_controls,
             text="← Previous",
-            command=lambda: self.parent._prev_meme() if hasattr(self.parent, "_prev_meme") else None,
+            command=self._handle_prev_meme,  # Modified to save caption before navigation
             state=tk.DISABLED,
             width=10
         )
@@ -431,7 +431,7 @@ class MemePreviewPanel(ttk.Frame):
         self.next_btn = ttk.Button(
             nav_controls, 
             text="Next →",
-            command=lambda: self.parent._next_meme() if hasattr(self.parent, "_next_meme") else None,
+            command=self._handle_next_meme,  # Modified to save caption before navigation
             state=tk.DISABLED,
             width=10
         )
@@ -536,6 +536,18 @@ class MemePreviewPanel(ttk.Frame):
 
         # Set initial sash position after all widgets are created
         self.after(100, lambda: self.content_paned.sashpos(0, 400))
+
+    def _handle_prev_meme(self):
+        """Save caption before navigating to previous meme"""
+        self.save_caption()
+        if hasattr(self.parent, '_prev_meme'):
+            self.parent._prev_meme()
+
+    def _handle_next_meme(self):
+        """Save caption before navigating to next meme"""
+        self.save_caption()
+        if hasattr(self.parent, '_next_meme'):
+            self.parent._next_meme()
 
     def set_meme(self, meme_url: str, captions: List[str], title: str, author: str):
         """Set the current meme for preview"""
@@ -1396,6 +1408,10 @@ class QueuePanel(ttk.Frame):
         self.queue = []
         self.active_tasks = 0
         self.max_concurrent_tasks = 1  # Default to 1, can be adjusted
+        
+        # Log buffer for each queue item
+        self.log_buffers = {}  # item_id -> log string
+        self.currently_viewing_log = None  # Currently displayed log item_id
 
         # Create UI elements
         self.create_widgets()
@@ -1416,9 +1432,13 @@ class QueuePanel(ttk.Frame):
         )
         self.title_label.pack(side=tk.LEFT)
 
-        # Queue list
-        self.queue_frame = ttk.Frame(self)
-        self.queue_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Create a PanedWindow for queue list and log viewer
+        self.main_paned = ttk.PanedWindow(self, orient=tk.VERTICAL)
+        self.main_paned.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Queue list frame
+        self.queue_frame = ttk.Frame(self.main_paned)
+        self.main_paned.add(self.queue_frame, weight=1)
 
         # Column headers
         self.header_frame = ttk.Frame(self.queue_frame)
@@ -1430,16 +1450,84 @@ class QueuePanel(ttk.Frame):
         ttk.Label(self.header_frame, text="Status", width=10).pack(
             side=tk.LEFT, padx=(0, 10)
         )
-        ttk.Label(self.header_frame, text="Progress", width=10).pack(
+        ttk.Label(self.header_frame, text="Progress", width=20).pack(
             side=tk.LEFT, padx=(0, 10)
         )
-        ttk.Label(self.header_frame, text="Actions", width=15).pack(
+        ttk.Label(self.header_frame, text="Actions", width=25).pack(
             side=tk.LEFT, padx=(0, 10)
         )
 
         # Queue items will be added here
         self.queue_list_frame = ScrollableFrame(self.queue_frame)
         self.queue_list_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # Log viewer frame
+        self.log_frame = ttk.LabelFrame(self.main_paned, text="Process Log")
+        self.main_paned.add(self.log_frame, weight=1)
+
+        # Log text widget with scrollbar
+        self.log_text = scrolledtext.ScrolledText(self.log_frame, wrap=tk.WORD, height=10)
+        self.log_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.log_text.config(state=tk.DISABLED)  # Read-only initially
+        
+        # Metadata display (for video title, description, tags)
+        self.metadata_frame = ttk.LabelFrame(self.main_paned, text="Generated Metadata")
+        self.main_paned.add(self.metadata_frame, weight=1)
+        
+        # Create notebook for metadata tabs
+        self.metadata_notebook = ttk.Notebook(self.metadata_frame)
+        self.metadata_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Title/Description tab
+        self.title_desc_frame = ttk.Frame(self.metadata_notebook)
+        self.metadata_notebook.add(self.title_desc_frame, text="Title & Description")
+        
+        # Add title and description fields
+        title_frame = ttk.Frame(self.title_desc_frame)
+        title_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(title_frame, text="Title:").pack(side=tk.LEFT)
+        self.title_entry = ttk.Entry(title_frame, width=50)
+        self.title_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        desc_frame = ttk.Frame(self.title_desc_frame)
+        desc_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        ttk.Label(desc_frame, text="Description:").pack(anchor=tk.W)
+        self.desc_text = scrolledtext.ScrolledText(desc_frame, height=5)
+        self.desc_text.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Comments tab
+        self.comments_frame = ttk.Frame(self.metadata_notebook)
+        self.metadata_notebook.add(self.comments_frame, text="Comments")
+        
+        self.comments_text = scrolledtext.ScrolledText(self.comments_frame)
+        self.comments_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Tags tab
+        self.tags_frame = ttk.Frame(self.metadata_notebook)
+        self.metadata_notebook.add(self.tags_frame, text="Tags")
+        
+        self.tags_text = scrolledtext.ScrolledText(self.tags_frame)
+        self.tags_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Metadata copy buttons
+        metadata_btn_frame = ttk.Frame(self.metadata_frame)
+        metadata_btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.copy_title_btn = ttk.Button(metadata_btn_frame, text="Copy Title", 
+                                        command=lambda: self.copy_to_clipboard(self.title_entry.get()))
+        self.copy_title_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.copy_desc_btn = ttk.Button(metadata_btn_frame, text="Copy Description", 
+                                       command=lambda: self.copy_to_clipboard(self.desc_text.get(1.0, tk.END)))
+        self.copy_desc_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.copy_comments_btn = ttk.Button(metadata_btn_frame, text="Copy Comments",
+                                          command=lambda: self.copy_to_clipboard(self.comments_text.get(1.0, tk.END)))
+        self.copy_comments_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.copy_tags_btn = ttk.Button(metadata_btn_frame, text="Copy Tags",
+                                      command=lambda: self.copy_to_clipboard(self.tags_text.get(1.0, tk.END)))
+        self.copy_tags_btn.pack(side=tk.LEFT, padx=2)
 
         # Control panel
         self.control_frame = ttk.Frame(self)
@@ -1454,6 +1542,11 @@ class QueuePanel(ttk.Frame):
             self.control_frame, text="Clear All", command=self.clear_all
         )
         self.clear_all_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.clear_log_btn = ttk.Button(
+            self.control_frame, text="Clear Log", command=self.clear_log
+        )
+        self.clear_log_btn.pack(side=tk.LEFT, padx=5)
 
         # Concurrent tasks setting
         ttk.Label(self.control_frame, text="Concurrent Tasks:").pack(
@@ -1470,20 +1563,22 @@ class QueuePanel(ttk.Frame):
             command=self.update_concurrent_tasks,
         )
         self.concurrent_spinbox.pack(side=tk.LEFT)
+        
+        # Set initial sash positions after a short delay
+        self.after(100, lambda: self.main_paned.sashpos(0, 200))
+        self.after(100, lambda: self.main_paned.sashpos(1, 400))
 
-    def update_concurrent_tasks(self):
-        """Update the maximum number of concurrent tasks"""
-        try:
-            self.max_concurrent_tasks = int(self.concurrent_var.get())
-            self.check_queue()  # Check queue immediately to start new tasks if needed
-        except:
-            pass
+    def copy_to_clipboard(self, text):
+        """Copy text to clipboard"""
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        messagebox.showinfo("Copied", "Content copied to clipboard")
 
-    def add_to_queue(self, queue_item):
-        """Add a new item to the queue"""
-        self.queue.append(queue_item)
-        self.update_queue_display()
-        self.check_queue()  # Check if we can start processing
+    def clear_log(self):
+        """Clear the log display"""
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.delete(1.0, tk.END)
+        self.log_text.config(state=tk.DISABLED)
 
     def update_queue_display(self):
         """Update the queue display with current items"""
@@ -1493,6 +1588,13 @@ class QueuePanel(ttk.Frame):
 
         # Add each queue item to the display
         for idx, item in enumerate(self.queue):
+            # Generate a unique ID for the item for log tracking
+            if not hasattr(item, 'item_id'):
+                item.item_id = f"item_{id(item)}"
+                # Initialize log buffer if needed
+                if item.item_id not in self.log_buffers:
+                    self.log_buffers[item.item_id] = ""
+            
             item_frame = ttk.Frame(self.queue_list_frame.scrollable_frame)
             item_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=2)
 
@@ -1502,26 +1604,56 @@ class QueuePanel(ttk.Frame):
             )
             subreddit_label.pack(side=tk.LEFT, padx=(0, 10))
 
-            # Status
-            status_label = ttk.Label(item_frame, text=item.status.title(), width=10)
+            # Status with more detail
+            status_text = item.status.title()
+            if item.status == "processing" and hasattr(item, 'current_step'):
+                status_text = f"{status_text}: {item.current_step}"
+            
+            status_label = ttk.Label(item_frame, text=status_text, width=10)
             status_label.pack(side=tk.LEFT, padx=(0, 10))
 
-            # Progress
+            # Progress with percentage text
+            progress_frame = ttk.Frame(item_frame, width=150)
+            progress_frame.pack(side=tk.LEFT, padx=(0, 10))
+            
             if item.status == "processing":
                 progress_var = tk.IntVar(value=item.progress)
                 progress_bar = ttk.Progressbar(
-                    item_frame, variable=progress_var, length=100, mode="determinate"
+                    progress_frame, variable=progress_var, length=100, mode="determinate"
                 )
-                progress_bar.pack(side=tk.LEFT, padx=(0, 10))
-                # Store progress var reference
+                progress_bar.pack(side=tk.LEFT)
+                
+                # Add percentage text
+                percent_label = ttk.Label(progress_frame, text=f"{item.progress}%", width=5)
+                percent_label.pack(side=tk.LEFT, padx=5)
+                
+                # Store progress var and label reference
                 item_frame.progress_var = progress_var
+                item_frame.percent_label = percent_label
             else:
-                placeholder = ttk.Frame(item_frame, width=100)
-                placeholder.pack(side=tk.LEFT, padx=(0, 10))
+                placeholder = ttk.Frame(progress_frame, width=140)
+                placeholder.pack(side=tk.LEFT)
 
             # Action buttons based on status
             actions_frame = ttk.Frame(item_frame)
             actions_frame.pack(side=tk.LEFT, padx=(0, 10))
+
+            # View log button for all items
+            ttk.Button(
+                actions_frame,
+                text="View Log",
+                command=lambda i=item.item_id: self.view_item_log(i),
+                width=8
+            ).pack(side=tk.LEFT, padx=2)
+            
+            # View metadata button for completed items
+            if item.status == "completed" and item.metadata:
+                ttk.Button(
+                    actions_frame,
+                    text="View Metadata",
+                    command=lambda m=item.metadata: self.view_metadata(m),
+                    width=12
+                ).pack(side=tk.LEFT, padx=2)
 
             if item.status == "queued":
                 # Cancel button for queued items
@@ -1529,9 +1661,10 @@ class QueuePanel(ttk.Frame):
                     actions_frame,
                     text="Cancel",
                     command=lambda i=idx: self.cancel_item(i),
+                    width=8
                 ).pack(side=tk.LEFT, padx=2)
             elif item.status == "processing":
-                # Can't cancel while processing
+                # Can't cancel while processing, but show a details button
                 ttk.Label(actions_frame, text="Processing...").pack(
                     side=tk.LEFT, padx=2
                 )
@@ -1541,12 +1674,14 @@ class QueuePanel(ttk.Frame):
                     actions_frame,
                     text="Open",
                     command=lambda p=item.output_path: self.open_video(p),
+                    width=8
                 ).pack(side=tk.LEFT, padx=2)
                 # Open folder button
                 ttk.Button(
                     actions_frame,
                     text="Folder",
                     command=lambda p=item.output_path: self.open_folder(p),
+                    width=8
                 ).pack(side=tk.LEFT, padx=2)
             elif item.status == "failed":
                 # Retry button for failed items
@@ -1554,7 +1689,245 @@ class QueuePanel(ttk.Frame):
                     actions_frame,
                     text="Retry",
                     command=lambda i=idx: self.retry_item(i),
+                    width=8
                 ).pack(side=tk.LEFT, padx=2)
+
+    def view_item_log(self, item_id):
+        """Display the log for a specific queue item"""
+        if item_id in self.log_buffers:
+            # Update log display
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.delete(1.0, tk.END)
+            self.log_text.insert(tk.END, self.log_buffers[item_id])
+            self.log_text.config(state=tk.DISABLED)
+            
+            # Scroll to the end
+            self.log_text.see(tk.END)
+            
+            # Remember which log we're viewing
+            self.currently_viewing_log = item_id
+
+    def view_metadata(self, metadata):
+        """Display video metadata in the metadata tabs"""
+        # Clear previous content
+        self.title_entry.delete(0, tk.END)
+        self.desc_text.delete(1.0, tk.END)
+        self.comments_text.delete(1.0, tk.END)
+        self.tags_text.delete(1.0, tk.END)
+        
+        if not metadata:
+            return
+            
+        # Extract metadata from the first key (there should only be one)
+        video_path = list(metadata.keys())[0] if metadata else None
+        if not video_path or video_path not in metadata:
+            return
+            
+        video_metadata = metadata[video_path]
+        
+        # Set title and description if available
+        if 'title' in video_metadata:
+            self.title_entry.insert(0, video_metadata['title'])
+            
+        if 'description' in video_metadata:
+            self.desc_text.insert(1.0, video_metadata['description'])
+            
+        # Set comments if available
+        if 'comments' in video_metadata:
+            comments = video_metadata['comments']
+            if isinstance(comments, list):
+                self.comments_text.insert(1.0, '\n\n'.join(comments))
+            elif isinstance(comments, str):
+                self.comments_text.insert(1.0, comments)
+        
+        # Set tags if available
+        if 'tags' in video_metadata:
+            tags = video_metadata['tags']
+            if isinstance(tags, list):
+                self.tags_text.insert(1.0, ', '.join(tags))
+            elif isinstance(tags, str):
+                self.tags_text.insert(1.0, tags)
+        
+        # Switch to the first tab
+        self.metadata_notebook.select(0)
+
+    def add_to_queue(self, queue_item):
+        """Add a new item to the queue"""
+        self.queue.append(queue_item)
+        self.update_queue_display()
+        self.check_queue()  # Check if we can start processing
+
+    # ...existing code...
+
+    def _generate_video_thread(self, item):
+        """Worker thread for video generation - modified to use GUI-optimized generator and add logging"""
+        try:
+            # Extract only the parameters that Config accepts
+            # Create a filtered config dictionary with only the parameters Config accepts
+            config_dict = {
+                "subreddits": item.config.get("subreddits", ["memes"]),
+                "min_upvotes": item.config.get("min_upvotes", 3000),
+                "auto_mode": item.config.get("auto_mode", False),
+                "edge_tts_voice": item.config.get("edge_tts_voice", "en-AU-WilliamNeural"),
+                "edge_tts_rate": item.config.get("edge_tts_rate", "+15%"),
+                "edge_tts_volume": item.config.get("edge_tts_volume", "+5%"),
+                "edge_tts_pitch": item.config.get("edge_tts_pitch", "+30Hz"),
+                "upload": item.config.get("upload", False)
+            }
+            
+            # Add to log
+            self._add_to_log(item.item_id, f"Starting video generation for r/{item.subreddit}")
+            self._add_to_log(item.item_id, f"Configuration: {json.dumps(config_dict, indent=2)}")
+            
+            # Initialize components with filtered config
+            config = Config(**config_dict)
+            ai_client = AIClient()
+            media_processor = MediaProcessor(config)
+
+            # Use our GUI-optimized video generator with logging capability
+            video_generator = GUIVideoGenerator(config, ai_client, media_processor)
+            
+            # Add logging callbacks
+            def log_callback(message):
+                self._add_to_log(item.item_id, message)
+                
+                # Extract progress information if available
+                if "Progress:" in message:
+                    try:
+                        # Update the current step
+                        step_match = re.search(r"Step: ([^,]+),", message)
+                        if step_match:
+                            item.current_step = step_match.group(1)
+                            
+                        # Update progress percentage if available
+                        percent_match = re.search(r"(\d+)%", message)
+                        if percent_match:
+                            item.progress = int(percent_match.group(1))
+                            # Update UI
+                            self.parent.after(0, self.update_queue_display)
+                    except:
+                        pass  # Ignore parsing errors
+            
+            # Attach logger to video generator
+            video_generator.logger = log_callback
+            
+            # Log meme information
+            if item.meme_urls:
+                self._add_to_log(item.item_id, f"Using {len(item.meme_urls)} pre-selected memes")
+            else:
+                self._add_to_log(item.item_id, f"Will fetch {item.memes_count} memes from r/{item.subreddit}")
+            
+            # Update progress periodically
+            self.start_progress_updates(item)
+            
+            # Update current step
+            item.current_step = "Initializing"
+            self.parent.after(0, self.update_queue_display)
+
+            # Generate video - this won't produce CLI prompts
+            metadata = video_generator.generate_video(
+                subreddit=item.subreddit,
+                amount=item.memes_count,
+                post_type=item.post_type,
+                output_location=item.output_dir,
+                pre_meme_urls=item.meme_urls,  # May be None
+                pre_captions=item.captions,  # May be None
+            )
+            
+            self._add_to_log(item.item_id, "Video generation complete, finalizing...")
+            item.current_step = "Finalizing"
+            self.parent.after(0, self.update_queue_display)
+
+            # Wait for all processing to complete
+            video_generator.wait_for_completion()
+
+            # Video is complete, update item
+            output_path = list(metadata.keys())[0] if metadata else None
+            item.output_path = output_path
+            item.metadata = metadata
+            item.status = "completed"
+            item.progress = 100
+            item.current_step = "Completed"
+            
+            # Log completion
+            self._add_to_log(item.item_id, f"Video successfully generated: {output_path}")
+            
+            # If this is the current log being viewed, update it
+            if self.currently_viewing_log == item.item_id:
+                self.view_item_log(item.item_id)
+                
+            # Also show metadata if available
+            if metadata:
+                self.view_metadata(metadata)
+
+            # Update UI
+            self.parent.after(0, self.update_queue_display)
+        except Exception as e:
+            # Store error message before passing to lambda
+            error_message = str(e)
+            item.status = "failed"
+
+            # Update UI with the pre-captured error message
+            self.parent.after(0, self.update_queue_display)
+            self.parent.after(
+                0,
+                lambda msg=error_message: messagebox.showerror(
+                    "Generation Error",
+                    f"Error generating video for r/{item.subreddit}: {msg}",
+                ),
+            )
+
+    def start_progress_updates(self, item):
+        """Start periodic updates of progress percentage"""
+        # This is just a simulation since we don't have real-time progress tracking
+        # In a real implementation, we would use callbacks from the video generator
+
+        def update_progress():
+            if item.status != "processing":
+                return  # Stop updating if no longer processing
+
+            # Increment progress by 5-15% each time
+            item.progress += random.randint(5, 15)
+            if item.progress > 95:
+                item.progress = 95  # Cap at 95% until actually complete
+
+            # Update UI
+            self.parent.after(0, self.update_progress_ui)
+
+            # Schedule next update if still processing
+            if item.status == "processing":
+                delay = random.randint(2000, 5000)  # 2-5 seconds
+                self.parent.after(delay, update_progress)
+
+        # Start first update
+        self.parent.after(1000, update_progress)
+
+    def update_progress_ui(self):
+        """Update progress bars in the UI"""
+        for idx, item in enumerate(self.queue):
+            # Find the frame for this item
+            try:
+                item_frame = self.queue_list_frame.scrollable_frame.winfo_children()[
+                    idx
+                ]
+                if hasattr(item_frame, "progress_var") and item.status == "processing":
+                    item_frame.progress_var.set(item.progress)
+                    item_frame.percent_label.config(text=f"{item.progress}%")
+            except (IndexError, AttributeError):
+                pass
+
+    def _add_to_log(self, item_id, message):
+        """Add a message to the log buffer for a specific item"""
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        log_message = f"[{timestamp}] {message}\n"
+        if item_id in self.log_buffers:
+            self.log_buffers[item_id] += log_message
+        else:
+            self.log_buffers[item_id] = log_message
+
+        # If this is the current log being viewed, update it
+        if self.currently_viewing_log == item_id:
+            self.view_item_log(item_id)
 
     def cancel_item(self, idx):
         """Cancel a queued item"""
@@ -1629,8 +2002,10 @@ class QueuePanel(ttk.Frame):
         # If we can run more tasks, find the next queued item
         if self.active_tasks < self.max_concurrent_tasks:
             for item in self.queue:
-                if item.status == "queued":
+                if (item.status == "queued" and 
+                    self.active_tasks < self.max_concurrent_tasks):
                     self.process_item(item)
+                    self.active_tasks += 1  # Increment active task count
                     break
 
         # Schedule next check
@@ -1647,108 +2022,17 @@ class QueuePanel(ttk.Frame):
         )
         thread.start()
 
-    def _generate_video_thread(self, item):
-        """Worker thread for video generation - modified to use GUI-optimized generator"""
+    def update_concurrent_tasks(self, *args):
+        """Update the maximum number of concurrent tasks"""
         try:
-            # Extract only the parameters that Config accepts
-            # Create a filtered config dictionary with only the parameters Config accepts
-            config_dict = {
-                "subreddits": item.config.get("subreddits", ["memes"]),
-                "min_upvotes": item.config.get("min_upvotes", 3000),
-                "auto_mode": item.config.get("auto_mode", False),
-                "edge_tts_voice": item.config.get("edge_tts_voice", "en-AU-WilliamNeural"),
-                "edge_tts_rate": item.config.get("edge_tts_rate", "+15%"),
-                "edge_tts_volume": item.config.get("edge_tts_volume", "+5%"),
-                "edge_tts_pitch": item.config.get("edge_tts_pitch", "+30Hz"),
-                "upload": item.config.get("upload", False)
-            }
-            
-            # Initialize components with filtered config
-            config = Config(**config_dict)
-            ai_client = AIClient()
-            media_processor = MediaProcessor(config)
-
-            # Use our GUI-optimized video generator instead of the core one
-            video_generator = GUIVideoGenerator(config, ai_client, media_processor)
-
-            # Update progress periodically
-            self.start_progress_updates(item)
-
-            # Generate video - this won't produce CLI prompts
-            metadata = video_generator.generate_video(
-                subreddit=item.subreddit,
-                amount=item.memes_count,
-                post_type=item.post_type,
-                output_location=item.output_dir,
-                pre_meme_urls=item.meme_urls,  # May be None
-                pre_captions=item.captions,  # May be None
-            )
-
-            # Wait for all processing to complete
-            video_generator.wait_for_completion()
-
-            # Video is complete, update item
-            output_path = list(metadata.keys())[0] if metadata else None
-            item.output_path = output_path
-            item.metadata = metadata
-            item.status = "completed"
-            item.progress = 100
-
-            # Update UI
-            self.parent.after(0, self.update_queue_display)
-
-        except Exception as e:
-            # Store error message before passing to lambda
-            error_message = str(e)
-            item.status = "failed"
-
-            # Update UI with the pre-captured error message
-            self.parent.after(0, self.update_queue_display)
-            self.parent.after(
-                0,
-                lambda msg=error_message: messagebox.showerror(
-                    "Generation Error",
-                    f"Error generating video for r/{item.subreddit}: {msg}",
-                ),
-            )
-
-    def start_progress_updates(self, item):
-        """Start periodic updates of progress percentage"""
-        # This is just a simulation since we don't have real-time progress tracking
-        # In a real implementation, we would use callbacks from the video generator
-
-        def update_progress():
-            if item.status != "processing":
-                return  # Stop updating if no longer processing
-
-            # Increment progress by 5-15% each time
-            item.progress += random.randint(5, 15)
-            if item.progress > 95:
-                item.progress = 95  # Cap at 95% until actually complete
-
-            # Update UI
-            self.parent.after(0, self.update_progress_ui)
-
-            # Schedule next update if still processing
-            if item.status == "processing":
-                delay = random.randint(2000, 5000)  # 2-5 seconds
-                self.parent.after(delay, update_progress)
-
-        # Start first update
-        self.parent.after(1000, update_progress)
-
-    def update_progress_ui(self):
-        """Update progress bars in the UI"""
-        for idx, item in enumerate(self.queue):
-            # Find the frame for this item
-            try:
-                item_frame = self.queue_list_frame.scrollable_frame.winfo_children()[
-                    idx
-                ]
-                if hasattr(item_frame, "progress_var") and item.status == "processing":
-                    item_frame.progress_var.set(item.progress)
-            except (IndexError, AttributeError):
-                pass
+            value = int(self.concurrent_var.get())
+            if 1 <= value <= 4:  # Validate the range
+                self.max_concurrent_tasks = value
+                # Check queue immediately to start new tasks if needed
+                self.check_queue()
+        except (ValueError, tk.TclError):
+            # Reset to previous value if invalid
+            self.concurrent_var.set(self.max_concurrent_tasks)
 
 
 # Add a meme selection dialog class for picking memes
@@ -2292,26 +2576,40 @@ class MainApplication(tk.Tk):
         self.geometry("1200x800")
         self.minsize(900, 600)
 
-        # Configure the grid with resizable weights
-        # Configure columns - make the preview panel take more space
-        self.grid_columnconfigure(0, weight=1)  # Config panel - 1/4 of width
-        self.grid_columnconfigure(1, weight=3)  # Preview panel - 3/4 of width
-        
-        # Configure rows - make the top panels take more space
-        self.grid_rowconfigure(0, weight=4)  # Top panels - 4/5 of height
-        self.grid_rowconfigure(1, weight=1)  # Queue panel - 1/5 of height
+        # Configure the grid with resizable weights - simplified for better stability
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
 
-        # Create main frame with panedwindows for resizing
-        main_paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        main_paned.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        # Create main frame to hold all content
+        main_frame = ttk.Frame(self)
+        main_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(0, weight=3)  # Top section gets more space
+        main_frame.rowconfigure(1, weight=1)  # Bottom section gets less space
+
+        # Create a vertical paned window for the main layout
+        self.main_vertical_paned = ttk.PanedWindow(main_frame, orient=tk.VERTICAL)
+        self.main_vertical_paned.grid(row=0, column=0, rowspan=2, sticky="nsew")
+
+        # Top section frame
+        top_section = ttk.Frame(self.main_vertical_paned)
+        self.main_vertical_paned.add(top_section, weight=3)
+        
+        # Bottom section frame for queue panel
+        bottom_section = ttk.Frame(self.main_vertical_paned)
+        self.main_vertical_paned.add(bottom_section, weight=1)
+
+        # Create horizontal paned window for the top section
+        self.top_horizontal_paned = ttk.PanedWindow(top_section, orient=tk.HORIZONTAL)
+        self.top_horizontal_paned.pack(fill=tk.BOTH, expand=True)
 
         # Left side - Config panel
-        config_frame = ttk.Frame(main_paned)
-        main_paned.add(config_frame, weight=1)
+        config_frame = ttk.Frame(self.top_horizontal_paned)
+        self.top_horizontal_paned.add(config_frame, weight=1)
         
         # Right side - Preview panel 
-        preview_frame = ttk.Frame(main_paned)
-        main_paned.add(preview_frame, weight=3)
+        preview_frame = ttk.Frame(self.top_horizontal_paned)
+        self.top_horizontal_paned.add(preview_frame, weight=2)
 
         # Create the inner panels
         self.config_panel = ConfigPanel(config_frame)
@@ -2320,15 +2618,8 @@ class MainApplication(tk.Tk):
         self.preview_panel = MemePreviewPanel(preview_frame)
         self.preview_panel.pack(fill=tk.BOTH, expand=True)
 
-        # Vertical paned window for the queue panel
-        vertical_paned = ttk.PanedWindow(self, orient=tk.VERTICAL)
-        vertical_paned.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
-
-        # Queue panel frame
-        queue_frame = ttk.Frame(vertical_paned)
-        vertical_paned.add(queue_frame, weight=1)
-
-        self.queue_panel = QueuePanel(queue_frame)
+        # Bottom queue panel
+        self.queue_panel = QueuePanel(bottom_section)
         self.queue_panel.pack(fill=tk.BOTH, expand=True)
 
         # Create main menu
@@ -2354,7 +2645,49 @@ class MainApplication(tk.Tk):
         self.analyzed_memes = None
         self.analyzed_captions = None
         self.current_meme_index = 0
-
+        
+        # Set initial sash positions after the window is fully created
+        self.after(100, self.set_initial_sash_positions)
+        
+        # Bind resize event to maintain panel visibility
+        self.bind("<Configure>", self.on_window_resize)
+    
+    def set_initial_sash_positions(self):
+        """Set initial sash positions for the paned windows"""
+        # Get window width and height
+        width = self.winfo_width()
+        height = self.winfo_height()
+        
+        # Set horizontal paned window sash position (30% for config, 70% for preview)
+        self.top_horizontal_paned.sashpos(0, int(width * 0.3))
+        
+        # Set vertical paned window sash position (70% for top section, 30% for queue)
+        self.main_vertical_paned.sashpos(0, int(height * 0.7))
+    
+    def on_window_resize(self, event):
+        """Maintain minimum sizes for panels when resizing"""
+        # Only respond to the main window's resize events
+        if event.widget == self:
+            # Give a short delay to allow the window to finish resizing
+            self.after(100, self.adjust_sash_positions)
+    
+    def adjust_sash_positions(self):
+        """Adjust sash positions to maintain minimum sizes after resize"""
+        width = self.winfo_width()
+        height = self.winfo_height()
+        
+        # Ensure config panel has at least 25% width
+        min_config_width = int(width * 0.25)
+        current_config_width = self.top_horizontal_paned.sashpos(0)
+        if current_config_width < min_config_width:
+            self.top_horizontal_paned.sashpos(0, min_config_width)
+        
+        # Ensure top section has at least 60% height
+        min_top_height = int(height * 0.6)
+        current_top_height = self.main_vertical_paned.sashpos(0)
+        if current_top_height < min_top_height:
+            self.main_vertical_paned.sashpos(0, min_top_height)
+            
     def update_captions(self, new_captions):
         """Update captions for the current meme"""
         if (self.analyzed_memes is None or 
@@ -2578,10 +2911,13 @@ class MainApplication(tk.Tk):
         """Ensure navigation buttons are properly connected to their methods"""
         # Explicitly reconnect navigation buttons to their methods
         if hasattr(self.preview_panel, "prev_btn"):
-            self.preview_panel.prev_btn.config(command=self._prev_meme)
+            # Fix: Use preview panel's handler methods instead of direct navigation
+            # These handlers save captions before navigating
+            self.preview_panel.prev_btn.config(command=self.preview_panel._handle_prev_meme)
             
         if hasattr(self.preview_panel, "next_btn"):
-            self.preview_panel.next_btn.config(command=self._next_meme)
+            # Fix: Use preview panel's handler methods instead of direct navigation
+            self.preview_panel.next_btn.config(command=self.preview_panel._handle_next_meme)
             
         # Debug print to verify if navigation is enabled
         print(f"Navigation reconnected. Meme count: {len(self.analyzed_memes) if self.analyzed_memes else 0}")
@@ -2658,6 +2994,10 @@ class MainApplication(tk.Tk):
 
         # Check if captions have been edited
         if self.analyzed_memes and self.analyzed_captions:
+            # Fix: Save current meme's captions before proceeding
+            if hasattr(self.preview_panel, "save_caption"):
+                self.preview_panel.save_caption()
+                
             # Remind to save captions if they might have been edited
             if messagebox.askyesno(
                 "Caption Check", 
@@ -2752,4 +3092,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
