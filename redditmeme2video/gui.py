@@ -380,6 +380,56 @@ class MemePreviewPanel(ttk.Frame):
         )
         self.title_label.pack(side=tk.LEFT)
 
+        # Navigation and caption editing buttons at the top for better visibility
+        self.nav_frame = ttk.Frame(self)
+        self.nav_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+
+        # Navigation panel (left side)
+        nav_controls = ttk.Frame(self.nav_frame)
+        nav_controls.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.prev_btn = ttk.Button(
+            nav_controls,
+            text="← Previous",
+            command=lambda: self.parent._prev_meme() if hasattr(self.parent, "_prev_meme") else None,
+            state=tk.DISABLED,
+            width=10
+        )
+        self.prev_btn.pack(side=tk.LEFT, padx=5)
+
+        self.meme_counter = ttk.Label(
+            nav_controls, text="0/0", width=8
+        )
+        self.meme_counter.pack(side=tk.LEFT, padx=5)
+
+        self.next_btn = ttk.Button(
+            nav_controls, 
+            text="Next →",
+            command=lambda: self.parent._next_meme() if hasattr(self.parent, "_next_meme") else None,
+            state=tk.DISABLED,
+            width=10
+        )
+        self.next_btn.pack(side=tk.LEFT, padx=5)
+
+        # Caption editing buttons (right side)
+        caption_controls = ttk.Frame(self.nav_frame)
+        caption_controls.pack(side=tk.RIGHT, fill=tk.X)
+
+        self.save_caption_btn = ttk.Button(
+            caption_controls, text="💾 Save Caption", command=self.save_caption, width=15
+        )
+        self.save_caption_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.edit_ssml_btn = ttk.Button(
+            caption_controls, text="✏️ Edit SSML", command=self.open_ssml_editor, width=15
+        )
+        self.edit_ssml_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.play_caption_btn = ttk.Button(
+            caption_controls, text="🔊 Preview Voice", command=self.play_caption, width=15
+        )
+        self.play_caption_btn.pack(side=tk.LEFT, padx=5)
+
         # Preview image area
         self.image_frame = ttk.LabelFrame(self, text="Image")
         self.image_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -392,29 +442,24 @@ class MemePreviewPanel(ttk.Frame):
         self.canvas.create_text(200, 150, text=placeholder_text, fill="gray")
 
         # Caption preview area - MODIFIED to make captions editable
-        self.caption_frame = ttk.LabelFrame(self, text="Captions")
-        self.caption_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        self.caption_frame = ttk.LabelFrame(self, text="Caption Editor - Edit Text Below")
+        self.caption_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.caption_text = scrolledtext.ScrolledText(
             self.caption_frame, height=5, wrap=tk.WORD
         )
-        self.caption_text.pack(fill=tk.X, expand=True, padx=5, pady=5)
+        self.caption_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.caption_text.insert(tk.END, "No captions to display")
         
-        # Add caption action buttons
-        caption_btn_frame = ttk.Frame(self.caption_frame)
-        caption_btn_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
-        
-        self.save_caption_btn = ttk.Button(
-            caption_btn_frame, text="Save Caption", command=self.save_caption
+        # Caption hint text
+        hint_label = ttk.Label(
+            self.caption_frame, 
+            text="Edit captions here and click 'Save Caption' when done",
+            font=("TkDefaultFont", 8), 
+            foreground="grey"
         )
-        self.save_caption_btn.pack(side=tk.LEFT, padx=5)
+        hint_label.pack(side=tk.TOP, anchor=tk.W, padx=5)
         
-        self.edit_ssml_btn = ttk.Button(
-            caption_btn_frame, text="Edit with SSML Editor", command=self.open_ssml_editor
-        )
-        self.edit_ssml_btn.pack(side=tk.LEFT, padx=5)
-
         # Metadata area
         self.meta_frame = ttk.LabelFrame(self, text="Metadata")
         self.meta_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
@@ -444,11 +489,6 @@ class MemePreviewPanel(ttk.Frame):
         # Action buttons
         self.button_frame = ttk.Frame(self)
         self.button_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
-
-        self.play_caption_btn = ttk.Button(
-            self.button_frame, text="Play Caption", command=self.play_caption
-        )
-        self.play_caption_btn.pack(side=tk.LEFT, padx=5)
 
         self.open_reddit_btn = ttk.Button(
             self.button_frame, text="Open on Reddit", command=self.open_on_reddit
@@ -492,20 +532,32 @@ class MemePreviewPanel(ttk.Frame):
         else:
             self.caption_text.insert(tk.END, "No captions to display")
         
-        # Do NOT disable captions - leave them editable
-        # self.caption_text.config(state=tk.DISABLED)  <- REMOVE this line
-
+        # Make it clearer that captions are editable
+        self.caption_text.config(background="#f8f8f8")  # Light gray background to indicate editability
+        
+        # Add a hint at the top of the caption area
+        if not hasattr(self, "edit_hint_added"):
+            self.caption_text.insert("1.0", "--- EDIT CAPTIONS HERE (Save when done) ---\n\n")
+            self.edit_hint_added = True
+        
         # Download and display the image
         threading.Thread(target=self._load_image, daemon=True).start()
     
     def save_caption(self):
         """Save edited caption text back to the data model"""
         if not self.current_caption:
+            messagebox.showinfo("No Caption", "No captions available to edit.")
             return
             
         try:
             # Get the edited text
             edited_text = self.caption_text.get("1.0", tk.END).strip()
+            
+            # Handle the case where the edit hint is present
+            if "--- EDIT CAPTIONS HERE" in edited_text:
+                # Remove the hint line
+                edited_text = "\n".join([line for line in edited_text.split("\n") 
+                                       if not line.startswith("---")])
             
             # Split into sections by line/paragraph
             sections = [s.strip() for s in edited_text.split("\n\n") if s.strip()]
@@ -525,7 +577,10 @@ class MemePreviewPanel(ttk.Frame):
             for text in clean_sections:
                 new_captions.append(f"<speak>{text}</speak>")
             
-            # Update the captions in parent
+            # Update the current caption locally
+            self.current_caption = new_captions
+            
+            # Update the captions in parent (MainApplication)
             if hasattr(self.parent, 'update_captions'):
                 self.parent.update_captions(new_captions)
                 messagebox.showinfo("Success", "Captions saved successfully")
@@ -541,26 +596,38 @@ class MemePreviewPanel(ttk.Frame):
             return
             
         try:
-            # Use SSML editor
+            # Get current TTS settings from parent application if available
+            voice = self.tts_voice
+            rate = self.tts_rate
+            volume = self.tts_volume
+            pitch = self.tts_pitch
+            
+            # Update settings from parent config panel if available
+            if hasattr(self.parent, 'config_panel'):
+                voice = self.parent.config_panel.voice_var.get()
+                rate = self.parent.config_panel.rate_var.get()
+                volume = self.parent.config_panel.volume_var.get()
+                pitch = self.parent.config_panel.pitch_var.get()
+            
+            # Use SSML editor and pass current captions
             edited_captions = edit_ssml_captions(
                 self.current_caption,
-                voice_id=self.tts_voice,
-                rate=self.tts_rate,
-                volume=self.tts_volume,
-                pitch=self.tts_pitch
+                voice_id=voice,
+                rate=rate,
+                volume=volume,
+                pitch=pitch
             )
+            
+            # Update the current caption locally
+            self.current_caption = edited_captions
             
             # Update the captions in parent
             if hasattr(self.parent, 'update_captions'):
                 self.parent.update_captions(edited_captions)
                 
-            # Refresh display
-            self.set_meme(
-                self.current_meme_url,
-                edited_captions,
-                self.current_title,
-                self.current_author
-            )
+            # Refresh display to show edited captions
+            self.update_preview()
+            
             messagebox.showinfo("Success", "SSML captions updated successfully")
         except Exception as e:
             messagebox.showerror("SSML Editor Error", f"Error editing captions: {str(e)}")
@@ -1542,8 +1609,21 @@ class QueuePanel(ttk.Frame):
     def _generate_video_thread(self, item):
         """Worker thread for video generation - modified to use GUI-optimized generator"""
         try:
-            # Initialize needed components
-            config = Config(**item.config)
+            # Extract only the parameters that Config accepts
+            # Create a filtered config dictionary with only the parameters Config accepts
+            config_dict = {
+                "subreddits": item.config.get("subreddits", ["memes"]),
+                "min_upvotes": item.config.get("min_upvotes", 3000),
+                "auto_mode": item.config.get("auto_mode", False),
+                "edge_tts_voice": item.config.get("edge_tts_voice", "en-AU-WilliamNeural"),
+                "edge_tts_rate": item.config.get("edge_tts_rate", "+15%"),
+                "edge_tts_volume": item.config.get("edge_tts_volume", "+5%"),
+                "edge_tts_pitch": item.config.get("edge_tts_pitch", "+30Hz"),
+                "upload": item.config.get("upload", False)
+            }
+            
+            # Initialize components with filtered config
+            config = Config(**config_dict)
             ai_client = AIClient()
             media_processor = MediaProcessor(config)
 
@@ -1793,7 +1873,7 @@ class MemeSelectionDialog(tk.Toplevel):
     def on_tree_click(self, event):
         """Handle initial click for drag and drop"""
         region = self.tree.identify_region(event.x, event.y)
-        if region != "cell":
+        if (region != "cell"):
             return
 
         # Get clicked item
@@ -2124,14 +2204,19 @@ class MemeSelectionDialog(tk.Toplevel):
                 else:
                     current_subreddits = ["memes"]  # Default fallback
             
-            # Initialize components (use parent's config) - now including the required subreddits parameter
+            # Fix: Only pass the recognized parameters to Config
+            # Store TTS parameters separately for later use
             config = Config(
                 subreddits=current_subreddits,
-                edge_tts_voice=self.parent.config_panel.voice_var.get(),
-                edge_tts_rate=self.parent.config_panel.rate_var.get(),
-                edge_tts_volume=self.parent.config_panel.volume_var.get(),
-                edge_tts_pitch=self.parent.config_panel.pitch_var.get()
+                min_upvotes=self.parent.config_panel.upvotes_var.get(),
+                auto_mode=False  # Always use manual mode for selection
             )
+            
+            # Store TTS parameters for later use with edge_tts
+            tts_voice = self.parent.config_panel.voice_var.get()
+            tts_rate = self.parent.config_panel.rate_var.get()
+            tts_volume = self.parent.config_panel.volume_var.get()
+            tts_pitch = self.parent.config_panel.pitch_var.get()
 
             ai_client = AIClient()
             media_processor = MediaProcessor(config)
@@ -2171,28 +2256,49 @@ class MainApplication(tk.Tk):
         self.geometry("1200x800")
         self.minsize(900, 600)
 
-        # Configure the grid
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=3)
-        self.grid_rowconfigure(0, weight=3)
-        self.grid_rowconfigure(1, weight=1)
+        # Configure the grid with resizable weights
+        # Configure columns - make the preview panel take more space
+        self.grid_columnconfigure(0, weight=1)  # Config panel - 1/4 of width
+        self.grid_columnconfigure(1, weight=3)  # Preview panel - 3/4 of width
+        
+        # Configure rows - make the top panels take more space
+        self.grid_rowconfigure(0, weight=4)  # Top panels - 4/5 of height
+        self.grid_rowconfigure(1, weight=1)  # Queue panel - 1/5 of height
 
-        # Create panels
-        self.config_panel = ConfigPanel(self)
-        self.config_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        # Create main frame with panedwindows for resizing
+        main_paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        main_paned.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
-        self.preview_panel = MemePreviewPanel(self)
-        self.preview_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        # Left side - Config panel
+        config_frame = ttk.Frame(main_paned)
+        main_paned.add(config_frame, weight=1)
+        
+        # Right side - Preview panel 
+        preview_frame = ttk.Frame(main_paned)
+        main_paned.add(preview_frame, weight=3)
 
-        self.queue_panel = QueuePanel(self)
-        self.queue_panel.grid(
-            row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=10
-        )
+        # Create the inner panels
+        self.config_panel = ConfigPanel(config_frame)
+        self.config_panel.pack(fill=tk.BOTH, expand=True)
+
+        self.preview_panel = MemePreviewPanel(preview_frame)
+        self.preview_panel.pack(fill=tk.BOTH, expand=True)
+
+        # Vertical paned window for the queue panel
+        vertical_paned = ttk.PanedWindow(self, orient=tk.VERTICAL)
+        vertical_paned.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+
+        # Queue panel frame
+        queue_frame = ttk.Frame(vertical_paned)
+        vertical_paned.add(queue_frame, weight=1)
+
+        self.queue_panel = QueuePanel(queue_frame)
+        self.queue_panel.pack(fill=tk.BOTH, expand=True)
 
         # Create main menu
         self.create_menu()
 
-        # Add action buttons below config panel
+        # Add action buttons to config panel
         self.action_frame = ttk.Frame(self.config_panel)
         self.action_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
 
@@ -2402,8 +2508,14 @@ class MainApplication(tk.Tk):
                     # Show first meme in preview
                     self._show_meme(0)
 
+                    # Update navigation buttons
+                    self._update_nav_buttons()
+
+                    # Make sure the navigation buttons are properly connected
+                    self._reconnect_navigation_buttons()
+                    
                     # Complete analysis
-                    self._analysis_complete(len(self.analyzed_memes))
+                    self._analysis_complete()
                 else:
                     # User cancelled, reset button
                     self.analyze_btn.config(state=tk.NORMAL, text="Analyze Memes")
@@ -2426,40 +2538,28 @@ class MainApplication(tk.Tk):
                 lambda: self.analyze_btn.config(state=tk.NORMAL, text="Analyze Memes"),
             )
             
-    def _analysis_complete(self, count):
+    def _reconnect_navigation_buttons(self):
+        """Ensure navigation buttons are properly connected to their methods"""
+        # Explicitly reconnect navigation buttons to their methods
+        if hasattr(self.preview_panel, "prev_btn"):
+            self.preview_panel.prev_btn.config(command=self._prev_meme)
+            
+        if hasattr(self.preview_panel, "next_btn"):
+            self.preview_panel.next_btn.config(command=self._next_meme)
+            
+        # Debug print to verify if navigation is enabled
+        print(f"Navigation reconnected. Meme count: {len(self.analyzed_memes) if self.analyzed_memes else 0}")
+        print(f"Current index: {self.current_meme_index}")
+
+    def _setup_navigation_ui(self, count):
+        """Create and configure navigation buttons - REMOVED as it's now built into the preview panel"""
+        # Method no longer needed as navigation buttons are part of the preview panel
+        pass
+
+    def _analysis_complete(self):
         """Handle completion of meme analysis"""
         self.analyze_btn.config(state=tk.NORMAL, text="Analyze Memes")
 
-        # Add navigation buttons to preview panel if multiple memes
-        if count > 1:
-            if not hasattr(self.preview_panel, "nav_frame"):
-                self.preview_panel.nav_frame = ttk.Frame(self.preview_panel)
-                self.preview_panel.nav_frame.pack(
-                    side=tk.BOTTOM, fill=tk.X, padx=5, pady=5
-                )
-
-                self.preview_panel.prev_btn = ttk.Button(
-                    self.preview_panel.nav_frame,
-                    text="Previous",
-                    command=self._prev_meme,
-                )
-                self.preview_panel.prev_btn.pack(side=tk.LEFT, padx=5)
-
-                self.preview_panel.next_btn = ttk.Button(
-                    self.preview_panel.nav_frame, text="Next", command=self._next_meme
-                )
-                self.preview_panel.next_btn.pack(side=tk.LEFT, padx=5)
-
-                self.preview_panel.meme_counter = ttk.Label(
-                    self.preview_panel.nav_frame, text=f"1/{count}"
-                )
-                self.preview_panel.meme_counter.pack(side=tk.LEFT, padx=10)
-            else:
-                self.preview_panel.meme_counter.config(text=f"1/{count}")
-
-            # Update button states
-            self._update_nav_buttons()
-            
     def _show_meme(self, index):
         """Show a specific meme in the preview panel"""
         if not self.analyzed_memes or index < 0 or index >= len(self.analyzed_memes):
@@ -2478,34 +2578,24 @@ class MainApplication(tk.Tk):
             self.config_panel.pitch_var.get(),
         )
 
-        # Update meme counter if it exists
-        if hasattr(self.preview_panel, "meme_counter"):
+        # Store current index
+        self.current_meme_index = index
+
+        # Update meme counter directly in preview panel
+        if self.analyzed_memes:
             self.preview_panel.meme_counter.config(
                 text=f"{index+1}/{len(self.analyzed_memes)}"
             )
-
-    def _prev_meme(self):
-        """Show previous meme in preview"""
-        if self.current_meme_index > 0:
-            self.current_meme_index -= 1
-            self._show_meme(self.current_meme_index)
-            self._update_nav_buttons()
-
-    def _next_meme(self):
-        """Show next meme in preview"""
-        if (
-            self.analyzed_memes
-            and self.current_meme_index < len(self.analyzed_memes) - 1
-        ):
-            self.current_meme_index += 1
-            self._show_meme(self.current_meme_index)
-            self._update_nav_buttons()
+        
+        # Update navigation buttons
+        self._update_nav_buttons()
 
     def _update_nav_buttons(self):
-        """Update navigation button states"""
-        if not hasattr(self.preview_panel, "prev_btn") or not hasattr(
-            self.preview_panel, "next_btn"
-        ):
+        """Update navigation button states in preview panel"""
+        if not hasattr(self, "analyzed_memes") or not self.analyzed_memes:
+            # Disable both buttons if no memes
+            self.preview_panel.prev_btn.config(state=tk.DISABLED)
+            self.preview_panel.next_btn.config(state=tk.DISABLED)
             return
 
         # Enable/disable previous button
@@ -2515,10 +2605,7 @@ class MainApplication(tk.Tk):
             self.preview_panel.prev_btn.config(state=tk.NORMAL)
 
         # Enable/disable next button
-        if (
-            not self.analyzed_memes
-            or self.current_meme_index >= len(self.analyzed_memes) - 1
-        ):
+        if self.current_meme_index >= len(self.analyzed_memes) - 1:
             self.preview_panel.next_btn.config(state=tk.DISABLED)
         else:
             self.preview_panel.next_btn.config(state=tk.NORMAL)
@@ -2532,6 +2619,15 @@ class MainApplication(tk.Tk):
         if not config_dict["subreddits"]:
             messagebox.showerror("Error", "Please add at least one subreddit")
             return
+
+        # Check if captions have been edited
+        if self.analyzed_memes and self.analyzed_captions:
+            # Remind to save captions if they might have been edited
+            if messagebox.askyesno(
+                "Caption Check", 
+                "Make sure you've saved any caption edits using the 'Save Caption Changes' button.\n\nContinue with video generation?"
+            ) is False:
+                return
 
         # Ask for confirmation before generating
         if not messagebox.askyesno(
@@ -2579,6 +2675,19 @@ class MainApplication(tk.Tk):
             "Success",
             f"Added {len(config_dict['subreddits'])} video(s) to the generation queue",
         )
+
+    def _prev_meme(self):
+        """Show previous meme in preview"""
+        if self.analyzed_memes and self.current_meme_index > 0:
+            self.current_meme_index -= 1
+            self._show_meme(self.current_meme_index)
+
+    def _next_meme(self):
+        """Show next meme in preview"""
+        if (self.analyzed_memes and 
+            self.current_meme_index < len(self.analyzed_memes) - 1):
+            self.current_meme_index += 1
+            self._show_meme(self.current_meme_index)
 
 
 def main():
