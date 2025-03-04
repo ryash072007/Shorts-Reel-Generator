@@ -683,7 +683,9 @@ class MemePreviewPanel(ttk.Frame):
             os.unlink(temp_file.name)
 
             # Update UI in main thread
-            self.after(0, lambda: self._playback_complete())
+            self.after(
+                0, lambda: self._playback_complete()
+            )
 
         except Exception as e:
             # Show error in main thread
@@ -1133,12 +1135,14 @@ class ConfigPanel(ScrollableFrame):
             )
 
         except Exception as e:
-            # Show error in main thread
+            # Store error message before passing to lambda
             error_message = str(e)
+            
+            # Show error in main thread with the pre-captured error message
             self.parent.after(
                 0,
-                lambda: messagebox.showerror(
-                    "Voice Test Error", f"Error testing voice: {error_message}"
+                lambda error=error_message: messagebox.showerror(
+                    "Voice Test Error", f"Error testing voice: {error}"
                 ),
             )
             self.parent.after(
@@ -1573,18 +1577,17 @@ class QueuePanel(ttk.Frame):
             self.parent.after(0, self.update_queue_display)
 
         except Exception as e:
-            # Handle errors
+            # Store error message before passing to lambda
             error_message = str(e)
-            print(f"Error generating video: {error_message}")
             item.status = "failed"
 
-            # Update UI
+            # Update UI with the pre-captured error message
             self.parent.after(0, self.update_queue_display)
             self.parent.after(
                 0,
-                lambda: messagebox.showerror(
+                lambda msg=error_message: messagebox.showerror(
                     "Generation Error",
-                    f"Error generating video for r/{item.subreddit}: {error_message}",
+                    f"Error generating video for r/{item.subreddit}: {msg}",
                 ),
             )
 
@@ -1657,6 +1660,12 @@ class MemeSelectionDialog(tk.Toplevel):
 
         # Wait for user interaction
         self.wait_window()
+        
+    # Add the missing method
+    def on_cancel(self):
+        """Handle dialog cancellation"""
+        self.result = None
+        self.destroy()
 
     def create_widgets(self):
         """Create UI widgets for the selection dialog"""
@@ -2139,398 +2148,19 @@ class MemeSelectionDialog(tk.Toplevel):
             self.after(0, finish)
 
         except Exception as e:
+            # Store error message before passing to lambda
             error_message = str(e)
-            def show_error():
-                self.update_status(f"Error: {error_message}", True)
+            
+            def show_error(msg):
+                self.update_status(f"Error: {msg}", True)
                 self.ok_btn.config(state=tk.NORMAL)
                 self.cancel_btn.config(state=tk.NORMAL)
                 self.select_all_btn.config(state=tk.NORMAL)
-                
-        self.config_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+            
+            self.after(0, lambda: show_error(error_message))
+# ...existing code...
 
-        self.preview_panel = MemePreviewPanel(self)
-        self.preview_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
-        self.queue_panel = QueuePanel(self)
-        self.queue_panel.grid(
-            row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=10
-        )
-
-        # Create main menu
-        self.create_menu()
-
-        # Add action buttons below config panel
-        self.action_frame = ttk.Frame(self.config_panel)
-        self.action_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
-
-        self.analyze_btn = ttk.Button(
-            self.action_frame, text="Analyze Memes", command=self.analyze_memes
-        )
-        self.analyze_btn.pack(side=tk.LEFT, padx=5)
-
-        self.generate_btn = ttk.Button(
-            self.action_frame,
-            text="Generate Video",
-            command=self.start_video_generation,
-        )
-        self.generate_btn.pack(side=tk.LEFT, padx=5)
-
-        # State variables
-        self.analyzed_memes = None
-        self.analyzed_captions = None
-        self.current_meme_index = 0
-
-    def create_menu(self):
-        """Create the application menu"""
-        menu_bar = tk.Menu(self)
-
-        # File menu
-        file_menu = tk.Menu(menu_bar, tearoff=0)
-        file_menu.add_command(label="New Video", command=self.clear_state)
-        file_menu.add_command(
-            label="Save Configuration", command=(self.config_panel.save_config)
-        )
-        file_menu.add_command(
-            label="Load Configuration", command=(self.config_panel.load_config)
-        )
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.quit)
-        menu_bar.add_cascade(label="File", menu=file_menu)
-
-        # Tools menu
-        tools_menu = tk.Menu(menu_bar, tearoff=0)
-        tools_menu.add_command(label="Check API Key", command=self.check_api_key)
-        tools_menu.add_command(label="Clear Cache", command=self.clear_cache)
-        menu_bar.add_cascade(label="Tools", menu=tools_menu)
-
-        # Help menu
-        help_menu = tk.Menu(menu_bar, tearoff=0)
-        help_menu.add_command(label="Documentation", command=self.open_documentation)
-        help_menu.add_command(label="About", command=self.show_about)
-        menu_bar.add_cascade(label="Help", menu=help_menu)
-
-        self.config(menu=menu_bar)
-
-    def clear_state(self):
-        """Clear the current state (analyzed memes, etc.)"""
-        self.analyzed_memes = None
-        self.analyzed_captions = None
-        self.current_meme_index = 0
-
-        # Clear preview
-        self.preview_panel.set_meme(None, None, None, None)
-
-    def check_api_key(self):
-        """Check if the API key is valid"""
-        groq_api_key = os.environ.get("GROQ_API_KEY")
-
-        if not groq_api_key:
-            messagebox.showerror(
-                "API Key Error",
-                "GROQ_API_KEY not found in environment variables. Please set it before continuing.",
-            )
-            return
-
-        # Start a test in background thread
-        self.analyze_btn.config(state=tk.DISABLED)
-        threading.Thread(
-            target=self._test_api_key, args=(groq_api_key,), daemon=True
-        ).start()
-
-    def _test_api_key(self, api_key):
-        """Test if the API key works in a background thread"""
-        try:
-            # Try to initialize the client
-            ai_client = AIClient(api_key)
-
-            # Make a small test request
-            response = ai_client.get_text_completion("Hello, are you working?")
-
-            # Show success message
-            self.after(
-                0,
-                lambda: messagebox.showinfo(
-                    "Success", "API key is valid and working correctly."
-                ),
-            )
-        except Exception as e:
-            # Show error message
-            self.after(
-                0,
-                lambda: messagebox.showerror(
-                    "API Key Error", f"Error testing API key: {str(e)}"
-                ),
-            )
-        finally:
-            # Re-enable button
-            self.after(0, lambda: self.analyze_btn.config(state=tk.NORMAL))
-
-    def clear_cache(self):
-        """Clear cached files"""
-        try:
-            # Initialize media processor with default config
-            media_processor = MediaProcessor(Config(subreddits=["memes"]))
-            media_processor.clean_temp_files()
-            messagebox.showinfo("Success", "Cache cleared successfully")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to clear cache: {str(e)}")
-
-    def open_documentation(self):
-        """Open documentation"""
-        webbrowser.open("https://github.com/YourUsername/Shorts-Reel-Generator")
-
-    def show_about(self):
-        """Show about dialog"""
-        about_text = """
-        Reddit Meme to Video Generator
-        
-        A tool for creating short-form videos from Reddit memes
-        with AI-generated captions and TTS narration.
-        
-        Version: 1.0.0
-        """
-        messagebox.showinfo("About", about_text)
-
-    def analyze_memes(self):
-        """Analyze memes from selected subreddit"""
-        # Get current config
-        config = self.config_panel.get_config()
-
-        # Check if subreddits are selected
-        if not config["subreddits"]:
-            messagebox.showerror("Error", "Please add at least one subreddit")
-            return
-
-        # Get the first subreddit for analysis
-        subreddit = config["subreddits"][0]
-
-        # Show processing dialog
-        self.analyze_btn.config(state=tk.DISABLED, text="Analyzing...")
-
-        # Start analysis in a background thread
-        threading.Thread(
-            target=self._analyze_thread,
-            args=(
-                subreddit,
-                config["memes_per_video"],
-                config["post_type"],
-                config["min_upvotes"],
-            ),
-            daemon=True,
-        ).start()
-
-    def _analyze_thread(self, subreddit, amount, post_type, min_upvotes):
-        """Run meme analysis in a background thread with selection capability"""
-        try:
-            # Initialize components
-            config = Config(
-                subreddits=[subreddit],
-                min_upvotes=min_upvotes,
-                auto_mode=False,  # Always use manual mode for GUI
-                edge_tts_voice=self.config_panel.voice_var.get(),
-                edge_tts_rate=self.config_panel.rate_var.get(),
-                edge_tts_volume=self.config_panel.volume_var.get(),
-                edge_tts_pitch=self.config_panel.pitch_var.get(),
-            )
-
-            ai_client = AIClient()
-            media_processor = MediaProcessor(config)
-
-            # Use our GUI-optimized generator to fetch memes WITHOUT captions to save API calls
-            video_generator = GUIVideoGenerator(config, ai_client, media_processor)
-
-            # Fetch memes only - no captions yet!
-            meme_urls = video_generator.collect_memes(subreddit, amount, post_type)
-
-            # Show selection dialog in the main thread
-            def show_selection_dialog():
-                # Note: We're passing None for captions since we haven't generated them yet
-                dialog = MemeSelectionDialog(self, meme_urls, None, amount)
-                if dialog.result:
-                    # Use selected memes and captions
-                    self.analyzed_memes, self.analyzed_captions = dialog.result
-                    self.current_meme_index = 0
-
-                    # Show first meme in preview
-                    self._show_meme(0)
-
-                    # Complete analysis
-                    self._analysis_complete(len(self.analyzed_memes))
-                else:
-                    # User cancelled, reset button
-                    self.analyze_btn.config(state=tk.NORMAL, text="Analyze Memes")
-
-            # Run selection dialog in main thread
-            self.after(0, show_selection_dialog)
-
-        except Exception as e:
-            # Show error in main thread
-            self.after(
-                0,
-                lambda: messagebox.showerror(
-                    "Analysis Error", f"Error analyzing memes: {str(e)}"
-                ),
-            )
-            self.after(
-                0,
-                lambda: self.analyze_btn.config(state=tk.NORMAL, text="Analyze Memes"),
-            )
-
-    def _analysis_complete(self, count):
-        """Handle completion of meme analysis"""
-        self.analyze_btn.config(state=tk.NORMAL, text="Analyze Memes")
-
-        # Add navigation buttons to preview panel if multiple memes
-        if count > 1:
-            if not hasattr(self.preview_panel, "nav_frame"):
-                self.preview_panel.nav_frame = ttk.Frame(self.preview_panel)
-                self.preview_panel.nav_frame.pack(
-                    side=tk.BOTTOM, fill=tk.X, padx=5, pady=5
-                )
-
-                self.preview_panel.prev_btn = ttk.Button(
-                    self.preview_panel.nav_frame,
-                    text="Previous",
-                    command=self._prev_meme,
-                )
-                self.preview_panel.prev_btn.pack(side=tk.LEFT, padx=5)
-
-                self.preview_panel.next_btn = ttk.Button(
-                    self.preview_panel.nav_frame, text="Next", command=self._next_meme
-                )
-                self.preview_panel.next_btn.pack(side=tk.LEFT, padx=5)
-
-                self.preview_panel.meme_counter = ttk.Label(
-                    self.preview_panel.nav_frame, text=f"1/{count}"
-                )
-                self.preview_panel.meme_counter.pack(side=tk.LEFT, padx=10)
-            else:
-                self.preview_panel.meme_counter.config(text=f"1/{count}")
-
-            # Update button states
-            self._update_nav_buttons()
-
-    def _show_meme(self, index):
-        """Show a specific meme in the preview panel"""
-        if not self.analyzed_memes or index < 0 or index >= len(self.analyzed_memes):
-            return
-
-        # Get meme and caption info
-        meme_url, author, title = self.analyzed_memes[index]
-        captions = self.analyzed_captions[index]
-
-        # Update preview panel
-        self.preview_panel.set_meme(meme_url, captions, title, author)
-        self.preview_panel.set_tts_settings(
-            self.config_panel.voice_var.get(),
-            self.config_panel.rate_var.get(),
-            self.config_panel.volume_var.get(),
-            self.config_panel.pitch_var.get(),
-        )
-
-        # Update meme counter if it exists
-        if hasattr(self.preview_panel, "meme_counter"):
-            self.preview_panel.meme_counter.config(
-                text=f"{index+1}/{len(self.analyzed_memes)}"
-            )
-
-    def _prev_meme(self):
-        """Show previous meme in preview"""
-        if self.current_meme_index > 0:
-            self.current_meme_index -= 1
-            self._show_meme(self.current_meme_index)
-            self._update_nav_buttons()
-
-    def _next_meme(self):
-        """Show next meme in preview"""
-        if (
-            self.analyzed_memes
-            and self.current_meme_index < len(self.analyzed_memes) - 1
-        ):
-            self.current_meme_index += 1
-            self._show_meme(self.current_meme_index)
-            self._update_nav_buttons()
-
-    def _update_nav_buttons(self):
-        """Update navigation button states"""
-        if not hasattr(self.preview_panel, "prev_btn") or not hasattr(
-            self.preview_panel, "next_btn"
-        ):
-            return
-
-        # Enable/disable previous button
-        if self.current_meme_index <= 0:
-            self.preview_panel.prev_btn.config(state=tk.DISABLED)
-        else:
-            self.preview_panel.prev_btn.config(state=tk.NORMAL)
-
-        # Enable/disable next button
-        if (
-            not self.analyzed_memes
-            or self.current_meme_index >= len(self.analyzed_memes) - 1
-        ):
-            self.preview_panel.next_btn.config(state=tk.DISABLED)
-        else:
-            self.preview_panel.next_btn.config(state=tk.NORMAL)
-
-    def start_video_generation(self):
-        """Start generating a video with current settings"""
-        # Get current config
-        config_dict = self.config_panel.get_config()
-
-        # Check if subreddits are selected
-        if not config_dict["subreddits"]:
-            messagebox.showerror("Error", "Please add at least one subreddit")
-            return
-
-        # Ask for confirmation before generating
-        if not messagebox.askyesno(
-            "Confirm", "Start video generation with current settings?"
-        ):
-            return
-
-        # If we've already analyzed memes, ask if we want to use them
-        use_analyzed = False
-        if self.analyzed_memes and self.analyzed_captions:
-            if messagebox.askyesno(
-                "Use Analyzed", "Use the already analyzed memes for video generation?"
-            ):
-                use_analyzed = True
-
-        # Create output directory if it doesn't exist
-        output_dir = config_dict["output_dir"]
-        os.makedirs(output_dir, exist_ok=True)
-
-        # For each subreddit, create a queue item
-        for subreddit in config_dict["subreddits"]:
-            # Generate unique output folder with timestamp
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            unique_dir = os.path.join(output_dir, f"{subreddit}_{timestamp}")
-
-            # Create queue item
-            queue_item = VideoQueueItem(
-                subreddit=subreddit,
-                memes_count=config_dict["memes_per_video"],
-                post_type=config_dict["post_type"],
-                config=config_dict,
-                output_dir=unique_dir,
-            )
-
-            # If using analyzed memes and it's the first subreddit, add them to the queue item
-            if use_analyzed and subreddit == config_dict["subreddits"][0]:
-                queue_item.meme_urls = self.analyzed_memes
-                queue_item.captions = self.analyzed_captions
-
-            # Add item to queue
-            self.queue_panel.add_to_queue(queue_item)
-
-        # Show confirmation
-        messagebox.showinfo(
-            "Success",
-            f"Added {len(config_dict['subreddits'])} video(s) to the generation queue",
-        )
-
-# Create MainApplication class from scratch, since the previous implementation was lost
 class MainApplication(tk.Tk):
     """Main application window"""
 
@@ -2670,12 +2300,13 @@ class MainApplication(tk.Tk):
                 ),
             )
         except Exception as e:
-            # Fix error handling - capture e in lambda
+            # Store error message before passing to lambda
             error_message = str(e)
+            
             self.after(
                 0,
-                lambda: messagebox.showerror(
-                    "API Key Error", f"Error testing API key: {error_message}"
+                lambda msg=error_message: messagebox.showerror(
+                    "API Key Error", f"Error testing API key: {msg}"
                 ),
             )
         finally:
@@ -2781,12 +2412,13 @@ class MainApplication(tk.Tk):
             self.after(0, show_selection_dialog)
 
         except Exception as e:
-            # Fix error handling - capture e in lambda
+            # Store error message before passing to lambda
             error_message = str(e)
+            
             self.after(
                 0,
-                lambda: messagebox.showerror(
-                    "Analysis Error", f"Error analyzing memes: {error_message}"
+                lambda msg=error_message: messagebox.showerror(
+                    "Analysis Error", f"Error analyzing memes: {msg}"
                 ),
             )
             self.after(
@@ -2947,8 +2579,6 @@ class MainApplication(tk.Tk):
             "Success",
             f"Added {len(config_dict['subreddits'])} video(s) to the generation queue",
         )
-
-
 
 
 def main():
