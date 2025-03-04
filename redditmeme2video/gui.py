@@ -456,9 +456,13 @@ class MemePreviewPanel(ttk.Frame):
         )
         self.play_caption_btn.pack(side=tk.LEFT, padx=5)
 
+        # Create a PanedWindow to allow resizing between image and caption areas
+        self.content_paned = ttk.PanedWindow(self, orient=tk.VERTICAL)
+        self.content_paned.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
         # Preview image area
-        self.image_frame = ttk.LabelFrame(self, text="Image")
-        self.image_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.image_frame = ttk.LabelFrame(self.content_paned, text="Image")
+        self.content_paned.add(self.image_frame, weight=2)  # Give image more initial weight
 
         self.canvas = tk.Canvas(self.image_frame, bg="#f0f0f0", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -467,14 +471,23 @@ class MemePreviewPanel(ttk.Frame):
         placeholder_text = "No meme selected for preview"
         self.canvas.create_text(200, 150, text=placeholder_text, fill="gray")
 
-        # Caption preview area - MODIFIED to make captions editable with increased height
-        self.caption_frame = ttk.LabelFrame(self, text="Caption Editor - Edit Text Below")
-        self.caption_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Caption preview area - MODIFIED to make captions resizable
+        self.caption_frame = ttk.LabelFrame(self.content_paned, text="Caption Editor - Edit Text Below")
+        self.content_paned.add(self.caption_frame, weight=1)  # Give caption area initial weight
 
+        # Create a container frame for the text widget and scrollbar
+        self.caption_container = ttk.Frame(self.caption_frame)
+        self.caption_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.caption_container.columnconfigure(0, weight=1)
+        self.caption_container.rowconfigure(0, weight=1)
+
+        # Create caption text widget with scrollbar attached directly to the container
         self.caption_text = scrolledtext.ScrolledText(
-            self.caption_frame, height=8, wrap=tk.WORD  # Increased height from 5 to 8
+            self.caption_container,
+            wrap=tk.WORD,  # Word wrapping
+            undo=True      # Enable undo/redo
         )
-        self.caption_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.caption_text.grid(row=0, column=0, sticky="nsew")  # Make it fill the grid cell completely
         self.caption_text.insert(tk.END, "No captions to display")
         
         # Caption hint text
@@ -484,7 +497,7 @@ class MemePreviewPanel(ttk.Frame):
             font=("TkDefaultFont", 8), 
             foreground="grey"
         )
-        hint_label.pack(side=tk.TOP, anchor=tk.W, padx=5)
+        hint_label.pack(side=tk.BOTTOM, anchor=tk.W, padx=5, pady=(0, 5))
         
         # Metadata area
         self.meta_frame = ttk.LabelFrame(self, text="Metadata")
@@ -520,6 +533,9 @@ class MemePreviewPanel(ttk.Frame):
             self.button_frame, text="Open on Reddit", command=self.open_on_reddit
         )
         self.open_reddit_btn.pack(side=tk.LEFT, padx=5)
+
+        # Set initial sash position after all widgets are created
+        self.after(100, lambda: self.content_paned.sashpos(0, 400))
 
     def set_meme(self, meme_url: str, captions: List[str], title: str, author: str):
         """Set the current meme for preview"""
