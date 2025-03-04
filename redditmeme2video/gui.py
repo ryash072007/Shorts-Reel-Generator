@@ -539,13 +539,17 @@ class MemePreviewPanel(ttk.Frame):
 
     def _handle_prev_meme(self):
         """Save caption before navigating to previous meme"""
-        self.save_caption()
+        # Save current caption first without showing message
+        self.save_caption(show_message=False)
+        # Then navigate
         if hasattr(self.parent, '_prev_meme'):
             self.parent._prev_meme()
 
     def _handle_next_meme(self):
         """Save caption before navigating to next meme"""
-        self.save_caption()
+        # Save current caption first without showing message
+        self.save_caption(show_message=False)
+        # Then navigate
         if hasattr(self.parent, '_next_meme'):
             self.parent._next_meme()
 
@@ -629,10 +633,11 @@ class MemePreviewPanel(ttk.Frame):
             # Update UI in main thread to show error
             self.after(0, lambda: self._show_image_error(str(e)))
 
-    def save_caption(self):
+    def save_caption(self, show_message=True):
         """Save edited caption text back to the data model"""
         if not self.current_caption:
-            messagebox.showinfo("No Caption", "No captions available to edit.")
+            if show_message:
+                messagebox.showinfo("No Caption", "No captions available to edit.")
             return
             
         try:
@@ -669,12 +674,14 @@ class MemePreviewPanel(ttk.Frame):
             # Update the captions in parent (MainApplication)
             if hasattr(self.parent, 'update_captions'):
                 self.parent.update_captions(new_captions)
-                messagebox.showinfo("Success", "Captions saved successfully")
-            else:
+                if show_message:  # Only show message if requested
+                    messagebox.showinfo("Success", "Captions saved successfully")
+            elif show_message:  # Only show message if requested
                 messagebox.showinfo("Info", "Captions edited but not saved to video generation")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save captions: {str(e)}")
-    
+            if show_message:  # Only show message if requested
+                messagebox.showerror("Error", f"Failed to save captions: {str(e)}")
+
     def open_ssml_editor(self):
         """Open captions in SSML editor"""
         if not self.current_caption:
@@ -2698,8 +2705,11 @@ class MainApplication(tk.Tk):
         # Update the captions for current meme
         self.analyzed_captions[self.current_meme_index] = new_captions
         
-        # Refresh preview
-        self._show_meme(self.current_meme_index)
+        # Don't refresh preview to avoid infinite loop
+        # self._show_meme(self.current_meme_index)  <- Remove this line
+        
+        # Just log that the update happened
+        print(f"Updated captions for meme {self.current_meme_index+1}/{len(self.analyzed_memes)}")
 
     def create_menu(self):
         """Create the application menu"""
@@ -2911,13 +2921,16 @@ class MainApplication(tk.Tk):
         """Ensure navigation buttons are properly connected to their methods"""
         # Explicitly reconnect navigation buttons to their methods
         if hasattr(self.preview_panel, "prev_btn"):
-            # Fix: Use preview panel's handler methods instead of direct navigation
+            # Use preview panel's handler methods instead of direct navigation
             # These handlers save captions before navigating
             self.preview_panel.prev_btn.config(command=self.preview_panel._handle_prev_meme)
             
         if hasattr(self.preview_panel, "next_btn"):
-            # Fix: Use preview panel's handler methods instead of direct navigation
+            # Use preview panel's handler methods instead of direct navigation
             self.preview_panel.next_btn.config(command=self.preview_panel._handle_next_meme)
+        
+        # Make sure the preview panel can access the parent methods
+        self.preview_panel.parent = self
             
         # Debug print to verify if navigation is enabled
         print(f"Navigation reconnected. Meme count: {len(self.analyzed_memes) if self.analyzed_memes else 0}")
