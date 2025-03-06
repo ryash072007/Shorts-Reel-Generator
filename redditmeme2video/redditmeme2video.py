@@ -52,7 +52,7 @@ logger = logging.getLogger("redditmeme2video")
 
 # Constants
 TARGET_WIDTH, TARGET_HEIGHT = 1080, 1920
-FPS = 60
+FPS = 45
 DEFAULT_MIN_UPVOTES = 3000  # Minimum upvotes for memes
 MEMES_PER_VIDEO = 3  # Number of memes per video
 
@@ -1139,7 +1139,7 @@ def main():
     """Main entry point."""
     # Load configuration with more options
     config = Config(
-        subreddits=["dankmemes"],
+        subreddits=["memes"],
         min_upvotes=4000,
         auto_mode=False,
         use_background_music=True  # Enable background music by default
