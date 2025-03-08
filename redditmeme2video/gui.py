@@ -648,7 +648,8 @@ class MemePreviewPanel(ttk.Frame):
             )
         except Exception as e:
             # Update UI in main thread to show error
-            self.after(0, lambda: self._show_image_error(str(e)))
+            error_msg = str(e)
+            self.after(0, lambda: self._show_image_error(error_msg))
 
     def save_caption(self, show_message=True):
         """Save edited caption text back to the data model"""
