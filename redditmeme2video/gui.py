@@ -48,6 +48,14 @@ DEFAULT_CONFIG = {
     "min_upvotes": 3000,
     "auto_mode": False,
     "upload": False,
+    "use_elevenlabs": True,  # Default to ElevenLabs
+    "elevenlabs_voice_id": "UgBBYS2sOqTuMpoF3BR0",  # Default to Mark voice
+    "elevenlabs_model": "eleven_flash_v2_5",
+    "elevenlabs_stability": 0.34,
+    "elevenlabs_similarity_boost": 0.75,
+    "elevenlabs_style": 0.34,
+    "elevenlabs_speaker_boost": True,
+    "elevenlabs_speed": 1.05,
     "edge_tts_voice": "en-AU-WilliamNeural",
     "edge_tts_rate": "+15%",
     "edge_tts_volume": "+5%",
@@ -68,6 +76,15 @@ TTS_VOICES = [
     "en-GB-RyanNeural",
     "en-CA-ClaraNeural",
     "en-IE-ConnorNeural",
+]
+
+# Popular ElevenLabs voices
+ELEVENLABS_VOICES = [
+    ("UgBBYS2sOqTuMpoF3BR0", "Mark"),
+    ("rMccYqkTp7l0Bj2Xxz3W", "Daniel"),
+    ("X1DzLZQVKrXSJOiIrDrN", "James"),
+    ("C7r8d6DTHYHXwTstJ9Vh", "Charlotte"),
+    ("oWAxZDx7w5VEj9dYyzcH", "Grace"),
 ]
 
 # Popular subreddit suggestions
@@ -1012,66 +1029,174 @@ class ConfigPanel(ScrollableFrame):
 
         # Voice Settings
         ttk.Label(
-            main_frame, text="TTS Voice Settings", font=("TkDefaultFont", 12, "bold")
+            main_frame, text="Voice Settings", font=("TkDefaultFont", 12, "bold")
         ).grid(row=12, column=0, columnspan=2, sticky="w", padx=5, pady=5)
 
-        # Voice selection
-        ttk.Label(main_frame, text="Voice:").grid(
+        # TTS Engine Selection
+        ttk.Label(main_frame, text="TTS Engine:").grid(
             row=13, column=0, sticky="w", padx=5, pady=5
+        )
+
+        self.tts_engine_var = tk.StringVar(value="elevenlabs" if DEFAULT_CONFIG["use_elevenlabs"] else "edge")
+        self.tts_engine_combo = ttk.Combobox(
+            main_frame,
+            textvariable=self.tts_engine_var,
+            values=["elevenlabs", "edge"],
+            state="readonly"
+        )
+        self.tts_engine_combo.grid(row=13, column=1, sticky="we", padx=5, pady=5)
+        self.tts_engine_combo.bind('<<ComboboxSelected>>', self._on_engine_change)
+
+        # ElevenLabs Settings Frame
+        self.elevenlabs_frame = ttk.LabelFrame(main_frame, text="ElevenLabs Settings")
+        self.elevenlabs_frame.grid(row=14, column=0, columnspan=2, sticky="we", padx=5, pady=5)
+
+        # ElevenLabs Voice selection
+        ttk.Label(self.elevenlabs_frame, text="Voice:").grid(
+            row=0, column=0, sticky="w", padx=5, pady=5
+        )
+        
+        self.elevenlabs_voice_var = tk.StringVar(value=DEFAULT_CONFIG["elevenlabs_voice_id"])
+        self.elevenlabs_voice_combo = ttk.Combobox(
+            self.elevenlabs_frame,
+            textvariable=self.elevenlabs_voice_var,
+            values=[f"{name} ({id})" for id, name in ELEVENLABS_VOICES],
+            state="readonly"
+        )
+        self.elevenlabs_voice_combo.grid(row=0, column=1, sticky="we", padx=5, pady=5)
+
+        # Stability slider
+        ttk.Label(self.elevenlabs_frame, text="Stability:").grid(
+            row=1, column=0, sticky="w", padx=5, pady=5
+        )
+        self.stability_var = tk.DoubleVar(value=DEFAULT_CONFIG["elevenlabs_stability"])
+        self.stability_scale = ttk.Scale(
+            self.elevenlabs_frame,
+            from_=0,
+            to=1,
+            variable=self.stability_var,
+            orient="horizontal"
+        )
+        self.stability_scale.grid(row=1, column=1, sticky="we", padx=5, pady=5)
+
+        # Similarity Boost slider
+        ttk.Label(self.elevenlabs_frame, text="Similarity:").grid(
+            row=2, column=0, sticky="w", padx=5, pady=5
+        )
+        self.similarity_var = tk.DoubleVar(value=DEFAULT_CONFIG["elevenlabs_similarity_boost"])
+        self.similarity_scale = ttk.Scale(
+            self.elevenlabs_frame,
+            from_=0,
+            to=1,
+            variable=self.similarity_var,
+            orient="horizontal"
+        )
+        self.similarity_scale.grid(row=2, column=1, sticky="we", padx=5, pady=5)
+
+        # Style slider
+        ttk.Label(self.elevenlabs_frame, text="Style:").grid(
+            row=3, column=0, sticky="w", padx=5, pady=5
+        )
+        self.style_var = tk.DoubleVar(value=DEFAULT_CONFIG["elevenlabs_style"])
+        self.style_scale = ttk.Scale(
+            self.elevenlabs_frame,
+            from_=0,
+            to=1,
+            variable=self.style_var,
+            orient="horizontal"
+        )
+        self.style_scale.grid(row=3, column=1, sticky="we", padx=5, pady=5)
+
+        # Speed slider
+        ttk.Label(self.elevenlabs_frame, text="Speed:").grid(
+            row=4, column=0, sticky="w", padx=5, pady=5
+        )
+        self.speed_var = tk.DoubleVar(value=DEFAULT_CONFIG["elevenlabs_speed"])
+        self.speed_scale = ttk.Scale(
+            self.elevenlabs_frame,
+            from_=0.5,
+            to=2.0,
+            variable=self.speed_var,
+            orient="horizontal"
+        )
+        self.speed_scale.grid(row=4, column=1, sticky="we", padx=5, pady=5)
+
+        # Speaker Boost checkbox
+        self.speaker_boost_var = tk.BooleanVar(value=DEFAULT_CONFIG["elevenlabs_speaker_boost"])
+        self.speaker_boost_check = ttk.Checkbutton(
+            self.elevenlabs_frame,
+            text="Speaker Boost",
+            variable=self.speaker_boost_var
+        )
+        self.speaker_boost_check.grid(row=5, column=0, columnspan=2, sticky="w", padx=5, pady=5)
+
+        # Edge TTS Settings Frame (existing settings)
+        self.edge_frame = ttk.LabelFrame(main_frame, text="Edge TTS Settings (Fallback)")
+        self.edge_frame.grid(row=15, column=0, columnspan=2, sticky="we", padx=5, pady=5)
+
+        # Move existing Edge TTS settings into edge_frame
+        ttk.Label(self.edge_frame, text="Voice:").grid(
+            row=0, column=0, sticky="w", padx=5, pady=5
         )
 
         self.voice_var = tk.StringVar(value=DEFAULT_CONFIG["edge_tts_voice"])
         self.voice_combo = ttk.Combobox(
-            main_frame, textvariable=self.voice_var, values=TTS_VOICES, state="readonly"
+            self.edge_frame, textvariable=self.voice_var, values=TTS_VOICES, state="readonly"
         )
-        self.voice_combo.grid(row=13, column=1, sticky="we", padx=5, pady=5)
+        self.voice_combo.grid(row=0, column=1, sticky="we", padx=5, pady=5)
 
         # Rate
-        ttk.Label(main_frame, text="Rate:").grid(
-            row=14, column=0, sticky="w", padx=5, pady=5
+        ttk.Label(self.edge_frame, text="Rate:").grid(
+            row=1, column=0, sticky="w", padx=5, pady=5
         )
 
         self.rate_var = tk.StringVar(value=DEFAULT_CONFIG["edge_tts_rate"])
         self.rate_combo = ttk.Combobox(
-            main_frame,
+            self.edge_frame,
             textvariable=self.rate_var,
             values=["-20%", "-10%", "+0%", "+10%", "+15%", "+20%", "+30%"],
         )
-        self.rate_combo.grid(row=14, column=1, sticky="we", padx=5, pady=5)
+        self.rate_combo.grid(row=1, column=1, sticky="we", padx=5, pady=5)
 
         # Volume
-        ttk.Label(main_frame, text="Volume:").grid(
-            row=15, column=0, sticky="w", padx=5, pady=5
+        ttk.Label(self.edge_frame, text="Volume:").grid(
+            row=2, column=0, sticky="w", padx=5, pady=5
         )
 
         self.volume_var = tk.StringVar(value=DEFAULT_CONFIG["edge_tts_volume"])
         self.volume_combo = ttk.Combobox(
-            main_frame,
+            self.edge_frame,
             textvariable=self.volume_var,
             values=["-20%", "-10%", "+0%", "+5%", "+10%", "+20%"],
         )
-        self.volume_combo.grid(row=15, column=1, sticky="we", padx=5, pady=5)
+        self.volume_combo.grid(row=2, column=1, sticky="we", padx=5, pady=5)
 
         # Pitch
-        ttk.Label(main_frame, text="Pitch:").grid(
-            row=16, column=0, sticky="w", padx=5, pady=5
+        ttk.Label(self.edge_frame, text="Pitch:").grid(
+            row=3, column=0, sticky="w", padx=5, pady=5
         )
 
         self.pitch_var = tk.StringVar(value=DEFAULT_CONFIG["edge_tts_pitch"])
         self.pitch_combo = ttk.Combobox(
-            main_frame,
+            self.edge_frame,
             textvariable=self.pitch_var,
             values=["-20Hz", "-10Hz", "+0Hz", "+10Hz", "+20Hz", "+30Hz"],
         )
-        self.pitch_combo.grid(row=16, column=1, sticky="we", padx=5, pady=5)
+        self.pitch_combo.grid(row=3, column=1, sticky="we", padx=5, pady=5)
 
         # Test voice button
         self.test_voice_btn = ttk.Button(
-            main_frame, text="Test Voice", command=self.test_voice
+            self.edge_frame, text="Test Voice", command=self.test_voice
         )
         self.test_voice_btn.grid(
-            row=17, column=0, columnspan=2, sticky="w", padx=5, pady=5
+            row=4, column=0, columnspan=2, sticky="w", padx=5, pady=5
         )
+
+        # Initial visibility
+        self._on_engine_change(None)
+
+        # Continue with rest of create_widgets
+        # ...existing code...
 
         # Separator
         ttk.Separator(main_frame, orient="horizontal").grid(
@@ -1171,6 +1296,15 @@ class ConfigPanel(ScrollableFrame):
         # Load subreddits from default config
         for subreddit in self.config["subreddits"]:
             self.subreddit_listbox.insert(tk.END, subreddit)
+
+    def _on_engine_change(self, event):
+        """Handle TTS engine selection change"""
+        if self.tts_engine_var.get() == "elevenlabs":
+            self.elevenlabs_frame.grid()
+            self.edge_frame.grid_remove()
+        else:
+            self.elevenlabs_frame.grid_remove()
+            self.edge_frame.grid()
 
     def add_subreddit(self):
         """Add a subreddit to the list"""
@@ -1374,6 +1508,18 @@ class ConfigPanel(ScrollableFrame):
         self.output_dir_var.set(config.get("output_dir", DEFAULT_CONFIG["output_dir"]))
         self.upload_var.set(config.get("upload", DEFAULT_CONFIG["upload"]))
 
+        # Apply TTS-specific settings
+        self.tts_engine_var.set("elevenlabs" if config.get("use_elevenlabs", True) else "edge")
+        self.elevenlabs_voice_var.set(config.get("elevenlabs_voice_id", DEFAULT_CONFIG["elevenlabs_voice_id"]))
+        self.stability_var.set(config.get("elevenlabs_stability", DEFAULT_CONFIG["elevenlabs_stability"]))
+        self.similarity_var.set(config.get("elevenlabs_similarity_boost", DEFAULT_CONFIG["elevenlabs_similarity_boost"]))
+        self.style_var.set(config.get("elevenlabs_style", DEFAULT_CONFIG["elevenlabs_style"]))
+        self.speaker_boost_var.set(config.get("elevenlabs_speaker_boost", DEFAULT_CONFIG["elevenlabs_speaker_boost"]))
+        self.speed_var.set(config.get("elevenlabs_speed", DEFAULT_CONFIG["elevenlabs_speed"]))
+        
+        # Update visibility
+        self._on_engine_change(None)
+
     def update_config(self):
         """Update configuration from UI values"""
         # Get subreddits from listbox
@@ -1395,6 +1541,14 @@ class ConfigPanel(ScrollableFrame):
             "animation_level": self.animation_var.get(),
             "output_dir": self.output_dir_var.get(),
             "upload": self.upload_var.get(),
+            "use_elevenlabs": self.tts_engine_var.get() == "elevenlabs",
+            "elevenlabs_voice_id": self.elevenlabs_voice_var.get().split("(")[-1].strip(")"),
+            "elevenlabs_model": "eleven_flash_v2_5",
+            "elevenlabs_stability": self.stability_var.get(),
+            "elevenlabs_similarity_boost": self.similarity_var.get(),
+            "elevenlabs_style": self.style_var.get(),
+            "elevenlabs_speaker_boost": self.speaker_boost_var.get(),
+            "elevenlabs_speed": self.speed_var.get(),
         }
 
         return self.config
