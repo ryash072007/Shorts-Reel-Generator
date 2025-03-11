@@ -1420,8 +1420,8 @@ class ConfigPanel(ScrollableFrame):
 
     def save_config(self):
         """Save current configuration to a file"""
-        # Get current configuration
-        self.update_config()
+        # Get current configuration with layout
+        config = self.parent.save_layout()
 
         # Ask for file location
         filepath = filedialog.asksaveasfilename(
@@ -1436,7 +1436,7 @@ class ConfigPanel(ScrollableFrame):
         try:
             # Write to file
             with open(filepath, "w") as f:
-                json.dump(self.config, f, indent=2)
+                json.dump(config, f, indent=2)
 
             messagebox.showinfo("Success", f"Configuration saved to {filepath}")
 
@@ -1461,6 +1461,10 @@ class ConfigPanel(ScrollableFrame):
 
             # Apply configuration
             self.apply_config(config)
+            
+            # Apply layout settings
+            self.parent.load_layout(config)
+            
             messagebox.showinfo("Success", f"Configuration loaded from {filepath}")
 
         except Exception as e:
@@ -2734,6 +2738,11 @@ class MainApplication(tk.Tk):
     def __init__(self):
         super().__init__()
 
+        # Start in full screen
+        self.state('zoomed')  # For Windows
+        # For Linux/Mac, use:
+        # self.attributes('-zoomed', True)
+
         self.title("Reddit Meme to Video Generator")
         self.geometry("1200x800")
         self.minsize(900, 600)
@@ -2813,6 +2822,17 @@ class MainApplication(tk.Tk):
         
         # Bind resize event to maintain panel visibility
         self.bind("<Configure>", self.on_window_resize)
+
+        # Track layout configuration
+        self.layout_config = {
+            'window_state': 'zoomed',
+            'window_geometry': '',
+            'top_horizontal_sash': 0.3,  # 30% for config panel
+            'main_vertical_sash': 0.7,   # 70% for top section
+        }
+
+        # Load any saved layout
+        self.load_layout()
     
     def set_initial_sash_positions(self):
         """Set initial sash positions for the paned windows"""
@@ -3232,6 +3252,70 @@ class MainApplication(tk.Tk):
             self.current_meme_index < len(self.analyzed_memes) - 1):
             self.current_meme_index += 1
             self._show_meme(self.current_meme_index)
+
+    def save_layout(self):
+        """Save current layout configuration"""
+        try:
+            # Get current window state and geometry
+            self.layout_config['window_state'] = self.state()
+            self.layout_config['window_geometry'] = self.geometry()
+
+            # Get sash positions as ratios of total size
+            width = self.winfo_width()
+            height = self.winfo_height()
+            
+            if width > 0 and height > 0:  # Prevent division by zero
+                top_sash = self.top_horizontal_paned.sashpos(0)
+                main_sash = self.main_vertical_paned.sashpos(0)
+                
+                self.layout_config['top_horizontal_sash'] = top_sash / width
+                self.layout_config['main_vertical_sash'] = main_sash / height
+
+            # Update the main configuration with layout information
+            config = self.config_panel.get_config()
+            config['layout'] = self.layout_config
+            
+            return config
+        except Exception as e:
+            print(f"Error saving layout: {e}")
+            return self.config_panel.get_config()
+
+    def load_layout(self, config=None):
+        """Load layout configuration"""
+        try:
+            if config and 'layout' in config:
+                self.layout_config = config['layout']
+            
+            # Apply window state
+            if self.layout_config.get('window_state'):
+                self.state(self.layout_config['window_state'])
+            
+            # Apply window geometry if not starting in zoomed state
+            if self.layout_config.get('window_geometry') and self.layout_config['window_state'] != 'zoomed':
+                self.geometry(self.layout_config['window_geometry'])
+            
+            # Schedule sash position updates after window is drawn
+            self.after(100, self.apply_sash_positions)
+        except Exception as e:
+            print(f"Error loading layout: {e}")
+
+    def apply_sash_positions(self):
+        """Apply saved sash positions"""
+        try:
+            width = self.winfo_width()
+            height = self.winfo_height()
+            
+            # Apply horizontal sash position
+            if 'top_horizontal_sash' in self.layout_config:
+                sash_x = int(width * self.layout_config['top_horizontal_sash'])
+                self.top_horizontal_paned.sashpos(0, sash_x)
+            
+            # Apply vertical sash position
+            if 'main_vertical_sash' in self.layout_config:
+                sash_y = int(height * self.layout_config['main_vertical_sash'])
+                self.main_vertical_paned.sashpos(0, sash_y)
+        except Exception as e:
+            print(f"Error applying sash positions: {e}")
 
 
 def main():
