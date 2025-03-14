@@ -104,15 +104,12 @@ Return the result in JSON format:
 }
 """
 
-# Add a helper function to strip SSML tags
 def strip_ssml_tags(ssml_text: str) -> str:
     """Strip SSML tags from text for use with edge_tts."""
-    # First use the SSMLParser method if available
     try:
         plain_text = SSMLParser.extract_content(ssml_text)
         return plain_text
     except:
-        # Fallback to regex if the parser fails
         return re.sub(r'<[^>]+>', '', ssml_text)
 
 @dataclass
@@ -130,46 +127,17 @@ class Config:
     edge_tts_volume: str = "+5%"  # Volume adjustment
     edge_tts_pitch: str = "+30Hz"  # Pitch adjustment
     # ElevenLabs settings
-    elevenlabs_voice_id: str = "UgBBYS2sOqTuMpoF3BR0"  # Default to Mark voice
-    elevenlabs_model: str = "eleven_flash_v2_5"        # Default to turbo model
+    elevenlabs_voice_id: str = "UgBBYS2sOqTuMpoF3BR0"  # Default to my own custom voice
+    elevenlabs_model: str = "eleven_flash_v2_5"
     elevenlabs_stability: float = 0.34
     elevenlabs_similarity_boost: float = 0.75
     elevenlabs_style: float = 0.34
     elevenlabs_speaker_boost: bool = True
     elevenlabs_speed: float = 1.05
     output_dir: str = "redditmeme2video/output"
-    dark_mode: bool = True  # Default to dark mode for modern appeal
+    dark_mode: bool = True
     animation_level: str = "high"  # Options: "low", "medium", "high"
-    use_background_music: bool = True  # Option to enable/disable background music
-    
-    @classmethod
-    def from_env(cls) -> "Config":
-        """Create configuration from environment variables."""
-        return cls(
-            subreddits=os.environ.get("SUBREDDITS", "memes,HistoryMemes").split(","),
-            min_upvotes=int(os.environ.get("MIN_UPVOTES", DEFAULT_MIN_UPVOTES)),
-            auto_mode=os.environ.get("AUTO_MODE", "0") == "1",
-            upload=os.environ.get("UPLOAD", "0") == "1",
-            # TTS engine selection
-            use_elevenlabs=os.environ.get("USE_ELEVENLABS", "1") == "1",
-            # edge_tts settings from environment
-            edge_tts_voice=os.environ.get("EDGE_TTS_VOICE", "en-AU-WilliamNeural"),
-            edge_tts_rate=os.environ.get("EDGE_TTS_RATE", "+15%"),
-            edge_tts_volume=os.environ.get("EDGE_TTS_VOLUME", "+0%"),
-            edge_tts_pitch=os.environ.get("EDGE_TTS_PITCH", "+0%"),
-            # ElevenLabs settings from environment
-            elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "UgBBYS2sOqTuMpoF3BR0"),
-            elevenlabs_model=os.environ.get("ELEVENLABS_MODEL", "eleven_flash_v2_5"),
-            elevenlabs_stability=float(os.environ.get("ELEVENLABS_STABILITY", "0.34")),
-            elevenlabs_similarity_boost=float(os.environ.get("ELEVENLABS_SIMILARITY_BOOST", "0.75")),
-            elevenlabs_style=float(os.environ.get("ELEVENLABS_STYLE", "0.34")),
-            elevenlabs_speaker_boost=os.environ.get("ELEVENLABS_SPEAKER_BOOST", "1") == "1",
-            elevenlabs_speed=float(os.environ.get("ELEVENLABS_SPEED", "1.05")),
-            output_dir=os.environ.get("OUTPUT_DIR", "redditmeme2video/output"),
-            dark_mode=os.environ.get("DARK_MODE", "1") == "1",
-            animation_level=os.environ.get("ANIMATION_LEVEL", "high"),
-            use_background_music=os.environ.get("USE_BACKGROUND_MUSIC", "1") == "1",
-        )
+    use_background_music: bool = True
 
 
 class AIClient:
@@ -220,7 +188,7 @@ class AIClient:
     def get_image_analysis(self, prompt: str, image_url: str, 
                          model: str = "llama-3.2-90b-vision-preview", is_retrying = False) -> Dict[str, Any]:
         """Analyze image using AI vision model with caching. The 11b model works better than the 11b version."""
-        # Check cache
+
         cache_key = f"{model}:{prompt}:{image_url}"
         if cache_key in self._cache:
             logger.info("Using cached image analysis")
@@ -248,7 +216,6 @@ class AIClient:
             logger.info("Received response from Groq API")
             result = json.loads(image_completion.choices[0].message.content)
             
-            # Cache result
             self._cache[cache_key] = result
             return result
         except Exception as e:
@@ -342,17 +309,15 @@ class MediaProcessor:
         else:
             self.elevenlabs_client = None
         
-        # Theme colors
         self.theme = self._get_theme_colors(config.dark_mode)
         
-        # Download or prepare Reddit logo for profile pic if not exists
         self.reddit_logo_path = self.assets_dir / "reddit_logo.png"
         if not self.reddit_logo_path.exists():
             self._prepare_reddit_logo()
             
         # Try to load fonts, use default if not available
-        self.title_font = self._load_font(26, bold=True)  # Increased for better readability
-        self.username_font = self._load_font(20)  # Increased for better readability
+        self.title_font = self._load_font(26, bold=True)
+        self.username_font = self._load_font(20)
         self._session = requests.Session()  # Reuse session for downloads
         self._download_lock = threading.Lock()  # Lock for thread-safe downloads
         self._audio_lock = threading.Lock()  # Lock for thread-safe audio generation
@@ -391,46 +356,31 @@ class MediaProcessor:
     def _load_font(self, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
         """Load font for image text. Falls back to default font if custom not available."""
         try:
-            # Try to use Arial or another common font
             if bold:
                 return ImageFont.truetype("arial.ttf", size=size, encoding="unic")
             else:
                 return ImageFont.truetype("arial.ttf", size=size, encoding="unic")
         except (IOError, OSError):
-            # Fall back to default font
             return ImageFont.load_default()
     
     def _prepare_reddit_logo(self):
         """Download and prepare Reddit logo for use as profile pic."""
         try:
-            # Reddit logo URL
             logo_url = "https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png"
             response = requests.get(logo_url)
             if response.status_code == 200:
                 img = Image.open(BytesIO(response.content))
-                # Resize to profile picture size and convert to circular
                 img = img.resize((40, 40))
-                # Save
                 img.save(self.reddit_logo_path)
             else:
-                # Create a simple placeholder
-                img = Image.new("RGB", (40, 40), (255, 69, 0))  # Reddit orange
-                draw = ImageDraw.Draw(img)
-                draw.text((20, 20), "R", fill="white", anchor="mm", font=self._load_font(24, bold=True))
-                img.save(self.reddit_logo_path)
+                raise ValueError(f"Failed to download Reddit logo: {response.status_code}")
         except Exception as e:
-            logger.error(f"Error preparing Reddit logo: {e}")
-            # Create a simple placeholder
-            img = Image.new("RGB", (40, 40), (255, 69, 0))  # Reddit orange
-            draw = ImageDraw.Draw(img)
-            draw.text((20, 20), "R", fill="white", anchor="mm", font=self._load_font(24, bold=True))
-            img.save(self.reddit_logo_path)
+            raise ValueError(f"Error preparing Reddit logo: {e}")
         
     def download_image(self, url: str, idx: int) -> Optional[str]:
         """Download image from URL and save locally."""
         filename = self.image_dir / f"meme_{idx}.png"
         
-        # If file exists, skip download
         if filename.exists():
             logger.info(f"Using cached image for {idx}")
             return str(filename)
@@ -469,7 +419,7 @@ class MediaProcessor:
             if self.config.use_elevenlabs and self.elevenlabs_client:
                 try:
                     logger.info("Attempting to generate audio with ElevenLabs")
-                    # Using ElevenLabs for TTS
+                    
                     response = self.elevenlabs_client.text_to_speech.convert(
                         voice_id=self.config.elevenlabs_voice_id,
                         output_format="mp3_22050_32",
@@ -484,7 +434,6 @@ class MediaProcessor:
                         ),
                     )
                     
-                    # Write the audio to the file
                     with open(output_file, "wb") as f:
                         for chunk in response:
                             if chunk:
@@ -503,7 +452,6 @@ class MediaProcessor:
                 # Strip SSML tags since edge_tts doesn't handle them the same way
                 plain_text = strip_ssml_tags(text)
                 
-                # Using edge_tts for TTS
                 communicate = edge_tts.Communicate(
                     plain_text,
                     self.config.edge_tts_voice,
@@ -520,8 +468,7 @@ class MediaProcessor:
                 
             except Exception as e:
                 logger.error(f"Error generating audio with edge_tts: {e}")
-                # Return empty file path if all methods fail
-                return ""
+                raise ValueError("Failed to generate audio with both ElevenLabs and edge_tts")
     
     def clean_temp_files(self):
         """Clean up temporary files created during processing."""
@@ -544,26 +491,21 @@ class MediaProcessor:
         
     def create_social_media_frame(self, image_path: str, title: str, username: str) -> Image.Image:
         """Create a Reddit-like frame around the image with post title."""
-        # Load the meme image
         meme_img = Image.open(image_path)
         
-        # Define padding and margins
         side_padding = 40
         
-        # Make frame smaller - reduce to 85% of previous minimum/maximum width
-        min_frame_width = int(TARGET_WIDTH * 0.6)  # Reduced from 0.7 to 0.6 (smaller minimum width)
-        max_frame_width = int(TARGET_WIDTH * 0.85)  # Reduced from 0.98 to 0.85 (smaller maximum width)
+        min_frame_width = int(TARGET_WIDTH * 0.6)
+        max_frame_width = int(TARGET_WIDTH * 0.85)
         
         # Calculate optimal meme size with better screen utilization
         # Start by calculating how large we can make the meme while maintaining aspect ratio
         scale_factor = min(max_frame_width / (meme_img.width + side_padding*2), 
-                          TARGET_HEIGHT * 0.6 / meme_img.height)  # Reduced from 0.7 to 0.6 (smaller height)
+                          TARGET_HEIGHT * 0.6 / meme_img.height)
         
-        # Apply scale factor to get new meme dimensions
         new_meme_width = int(meme_img.width * scale_factor)
         new_meme_height = int(meme_img.height * scale_factor)
         
-        # Resize meme with the calculated dimensions
         meme_img = meme_img.resize((new_meme_width, new_meme_height), Image.LANCZOS)
         
         # Calculate frame width based on meme width plus padding
@@ -585,7 +527,7 @@ class MediaProcessor:
         
         # Load profile picture (Reddit logo)
         profile_pic = Image.open(self.reddit_logo_path).convert("RGBA")
-        profile_pic = self._create_circular_mask(profile_pic.resize((55, 55)))  # Bigger profile pic
+        profile_pic = self._create_circular_mask(profile_pic.resize((55, 55)))
         
         # Add profile pic to frame - keep at left edge
         profile_x = 20
@@ -593,7 +535,7 @@ class MediaProcessor:
         
         # Add username - moved higher up to avoid title overlap
         username_x = profile_x + 65
-        username_y = 15  # Moved up from 35 to 15
+        username_y = 15
         draw.text((username_x, username_y), f"u/{username}", fill=self.theme["text_secondary"], font=self.username_font)
         
         # Add title text but with more vertical spacing from username
@@ -601,7 +543,7 @@ class MediaProcessor:
         
         # Create multi-line title for better readability - with increased left margin and vertical spacing
         title_x = username_x
-        title_y_offset = 30  # Reduced from 45 to 30 to bring title closer to username
+        title_y_offset = 30
         title_width = frame_width - title_x - 20
         title_lines = []
         line = ""
@@ -656,9 +598,9 @@ class MediaProcessor:
         # Create final image to place the frame on (transparent background for compositing)
         final_image = Image.new("RGBA", (TARGET_WIDTH, TARGET_HEIGHT), (0, 0, 0, 0))
         
-        # Center the frame horizontally and vertically (removed the -150 vertical offset)
+        # Center the frame horizontally and vertically
         paste_x = (TARGET_WIDTH - frame_width) // 2
-        paste_y = (TARGET_HEIGHT - frame_height) // 2  # Truly centered vertically
+        paste_y = (TARGET_HEIGHT - frame_height) // 2
         
         final_image.paste(frame, (paste_x, paste_y), frame)
         
@@ -770,7 +712,7 @@ class VideoGenerator:
                         random_selection = []
                     
                     # Create the new combined selection with saved memes at their positions
-                    selected_meme_urls = [None] * amount  # Initialize with None placeholders
+                    selected_meme_urls = [None] * amount
                     
                     # Place saved memes at their saved positions
                     for saved_meme, position in zip(saved_memes, saved_positions):
@@ -915,9 +857,6 @@ class VideoGenerator:
                 captions = image_reply["reading_order"]
                 return idx, captions
             
-            # Rest of the method remains the same
-            # ...existing code with caption processing...
-
             # Use ThreadPoolExecutor for parallel processing
             if self.config.auto_mode:  # Only parallelize in auto mode
                 futures = []
@@ -954,8 +893,8 @@ class VideoGenerator:
                     else:
                         edited_captions = edit_ssml_captions(
                             all_captions, 
-                            voice_id=self.config.edge_tts_voice,
                             # Pass Edge TTS configuration settings for audio preview
+                            voice_id=self.config.edge_tts_voice,
                             rate=self.config.edge_tts_rate,
                             volume=self.config.edge_tts_volume,
                             pitch=self.config.edge_tts_pitch
@@ -1002,7 +941,6 @@ class VideoGenerator:
         audio_path = self.media_processor.generate_audio(". ".join(captions), idx)
         audio_clip = AudioFileClip(audio_path)
         
-        # Download image
         meme_path = self.media_processor.download_image(image_url, idx)
         
         # Create social media frame with title
@@ -1183,7 +1121,7 @@ class VideoGenerator:
                 codec="libx264",
                 fps=FPS,
                 threads=os.cpu_count() or 4,  # Use all available CPU cores for encoding
-                preset="fast",  # Faster encoding with slight quality drop
+                preset="fast",
                 temp_audiofile_path=output_location,
             )
             logger.info("Video written successfully")

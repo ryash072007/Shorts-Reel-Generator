@@ -27,7 +27,7 @@ MOODS = {
 
 def load_soup(url):
     response = requests.get(url)
-    response.raise_for_status()  # Ensure we notice bad responses
+    response.raise_for_status()
     return BeautifulSoup(response.text, "html.parser")
 
 

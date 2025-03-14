@@ -245,7 +245,7 @@ class SSMLEditorGUI:
     
     def _save_and_exit(self):
         """Save all captions and close the editor."""
-        self._update_preview()  # Make sure current edits are saved
+        self._update_preview()
         self.master.destroy()
     
     def _add_tag_dialog(self, tag_type: str):
