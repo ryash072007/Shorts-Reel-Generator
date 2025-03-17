@@ -2112,17 +2112,7 @@ class QueuePanel(ttk.Frame):
     def open_video(self, path):
         """Open the generated video"""
         if path and os.path.exists(path):
-            if os.name == "nt":  # Windows
-                os.startfile(path)
-            else:  # macOS or Linux
-                try:
-                    import subprocess
-
-                    subprocess.call(
-                        ("xdg-open" if os.name == "posix" else "open", path)
-                    )
-                except:
-                    messagebox.showinfo("Info", f"Video file is located at: {path}")
+            os.startfile(path)
         else:
             messagebox.showwarning("Warning", "Video file not found")
 
@@ -2131,17 +2121,7 @@ class QueuePanel(ttk.Frame):
         if path:
             folder = os.path.dirname(path)
             if os.path.exists(folder):
-                if os.name == "nt":  # Windows
-                    os.startfile(folder)
-                else:  # macOS or Linux
-                    try:
-                        import subprocess
-
-                        subprocess.call(
-                            ("xdg-open" if os.name == "posix" else "open", folder)
-                        )
-                    except:
-                        messagebox.showinfo("Info", f"Folder path is: {folder}")
+                os.startfile(folder)
             else:
                 messagebox.showwarning("Warning", "Folder not found")
 
@@ -2877,20 +2857,12 @@ class MainApplication(tk.Tk):
             self.current_meme_index >= len(self.analyzed_captions)):
             return
             
-        # Update the captions for current meme
         self.analyzed_captions[self.current_meme_index] = new_captions
-        
-        # Don't refresh preview to avoid infinite loop
-        # self._show_meme(self.current_meme_index)  <- Remove this line
-        
-        # Just log that the update happened
         print(f"Updated captions for meme {self.current_meme_index+1}/{len(self.analyzed_memes)}")
 
     def create_menu(self):
-        """Create the application menu"""
         menu_bar = tk.Menu(self)
 
-        # File menu
         file_menu = tk.Menu(menu_bar, tearoff=0)
         file_menu.add_command(label="New Video", command=self.clear_state)
         file_menu.add_command(
@@ -2903,13 +2875,11 @@ class MainApplication(tk.Tk):
         file_menu.add_command(label="Exit", command=self.quit)
         menu_bar.add_cascade(label="File", menu=file_menu)
 
-        # Tools menu
         tools_menu = tk.Menu(menu_bar, tearoff=0)
         tools_menu.add_command(label="Check API Key", command=self.check_api_key)
         tools_menu.add_command(label="Clear Cache", command=self.clear_cache)
         menu_bar.add_cascade(label="Tools", menu=tools_menu)
 
-        # Help menu
         help_menu = tk.Menu(menu_bar, tearoff=0)
         help_menu.add_command(label="Documentation", command=self.open_documentation)
         help_menu.add_command(label="About", command=self.show_about)
